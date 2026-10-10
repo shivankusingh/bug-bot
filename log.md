@@ -17,3 +17,30 @@ leak= the whole in the bucket. so basically, each step the voltage loses a certa
 Verilog wires are directional, meaning info flows in only one direction.
 
 finished up basics on verilog!
+
+
+Day 2: 
+
+note:
+
+for defining vectors its dimensions come before its name 
+
+so 
+wire [99:0] my_vector;      // Declare a 100-element vector
+
+learned about vector gates, 
+logical operators (!, ||, &&, treat whole vector as a single true/false and give back 1 bit. )
+
+
+bitwise operators(~ , |, &) work on each bit seperately and give back a result as wide as the inputs 
+
+^ means xor
+
+Almost done with vectors
+
+
+Day 3:
+
+Finished vectors.
+
+
