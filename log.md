@@ -43,4 +43,4 @@ Day 3:
 
 Finished vectors.
 
-
+Make sure to plan out circuit before hand
