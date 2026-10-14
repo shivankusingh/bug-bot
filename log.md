@@ -44,3 +44,27 @@ Day 3:
 Finished vectors.
 
 Make sure to plan out circuit before hand
+
+
+## 2026-10-13 — 3-input neuron with inhibition, verified in Verilog
+
+**What I built**
+- Upgraded the integer LIF neuron from one input current to three spike inputs (A, B, C), each with its own weight: +300, +50, and −150 (inhibitory).
+- Each tick: total = sum of weights of inputs that fired; v = v − (v >> 3) + total; spike and reset to 0 when v ≥ 256.
+- Python reference model plus a hand-designed 16-tick test covering: strong input alone, weak input alone, weak input building up over time, excitatory + inhibitory together, inhibitory alone (negative voltage), and recovery from negative voltage.
+- Verilog version (`lif_neuron`) with a testbench that loads packed input spikes via `$readmemh`.
+
+**Result**
+- Verilog output matches the Python reference exactly on all 16 ticks, including the edge case where voltage hits 257 (just over threshold) and negative voltages (−77 → −67).
+
+**Bugs and lessons**
+- Widened voltage from 9 to 16 bits: weights and voltages up to ~350 plus negative values didn't fit.
+- Made voltage, total, weights, and threshold `signed`. Mixing signed and unsigned values makes Verilog treat the whole expression as unsigned, silently turning negatives into large positives.
+- Used `? :` instead of multiplying by the 1-bit spike input, so the 1-bit (unsigned) wire never enters the math.
+- Replaced bit-slicing for the leak with `>>>`, which keeps the sign and rounds down like Python's `>>`.
+- Fixed the threshold comparison to use a signed constant (`16'sd256`); an unsigned constant would make negative voltages trigger false spikes.
+- `np.savetxt` on a list of lists writes three space-separated values per line; packed each row into one number (A=4, B=2, C=1) so `$readmemh` reads one value per tick.
+
+**Next**
+- Self-checking testbench (PASS or first mismatch).
+- 3-neuron chain (A → B → C plus an inhibitory link), Python first, then Verilog with module hierarchy.
