@@ -103,3 +103,43 @@ Make sure to plan out circuit before hand
 **Next**
 - Save expected files for all 4 neurons → build the network in Verilog (parameterized weights, top module with 4 instances) → self-checking PASS.
 - Then: wiring-list refactor in Python → real touch circuit from connectome data.
+
+
+bug-bot log: Oct 27, 2026
+Summary
+
+Picked bug-bot back up after a break. Started refactoring the Python reference model from hardcoded per-neuron variables (total_a, last_a, ...) into a data-driven sparse connection list, so the same code can eventually run the full 302-neuron C. elegans connectome.
+
+What I did
+Reviewed my current 4-neuron network (A → B → C chain + inhibitory neuron I onto B) in both Verilog and Python.
+Set a workflow: I write the core RTL and model logic; Claude helps with tooling (testbenches, connectome parser, scripts). Rule: don't commit anything I can't explain line by line.
+Looked at EDA Playground alternatives. Plan: move to a local flow (Icarus/Verilator + cocotb + Surfer/GTKWave) so sims can read my golden-vector files directly.
+Decided to build the Python model with a sparse connection list instead of a dense matrix, to mirror how the hardware will store synapses.
+Wrote connections (one list of (target, weight) pairs per neuron) and the loop that computes each neuron's input from last step's spikes.
+Test: last_spikes = [1, 0, 0, 1] gives totals = [0, -100, 0, 0] ✅
+Wrote poke_connections (poke 0 → A at 300, poke 1 → I at 300).
+What I learned
+Connectivity as a matrix: an N×N weight matrix W[pre][post]. A column is everything a neuron listens to; a row is everything it sends to. All neurons' input totals = spike vector × W.
+Sparse storage: most entries are zero (no connection). Store only real connections: the position in the outer list = the sender, and each pair = (receiver, weight). Each stored entry carries its own "address," so anything missing is 0. Since adding 0 changes nothing, skipping zeros doesn't change the answer.
+Event-driven: only neurons that spiked get their lists processed, so silent neurons cost nothing. This is a big reason neuromorphic hardware is efficient.
+Scale: worm = 302×302 ≈ 91k slots but only a few thousand real synapses (dense is fine in Python). Fly ≈ 140k neurons, so a dense matrix is impossible and sparse is required. FPGA memory is small, so hardware will be sparse even for the worm (later: CSR format).
+Not every matrix is square: input/sensor matrices are (#inputs × N).
+Voltage vs. total: voltage = the neuron's memory (a leaky bucket, carried between steps); total = input arriving this step (reset to 0 each step). They must stay separate because the leak is computed on the old voltage before input is added (e.g. v=80, input 300: correct = 370, adding first = 333).
+Inhibition just adds a negative weight into the same sum (300 + −400 = −100); it doesn't overwrite excitation.
+Poke weight 300 > threshold 256, so one poke = guaranteed spike. A poke into the inhibitory neuron must be positive so it fires; its output is what's negative.
+Code structure: setup (network definition, runs once) vs. per-step code (totals, loops, voltage update, runs inside the main loop).
+Golden model caveat: Python ints never overflow, so wrap/saturation must be done inside the model, not just masked at export.
+Biology caveat: most real C. elegans neurons use graded potentials, not spikes. LIF is a deliberate simplification.
+Python: range(len(x)) not .size(); for target, weight in pairs: unpacks tuples.
+Mistakes I made (and fixed)
+Added weights to the sender (totals[i]) instead of the receiver (totals[target]).
+First poke loop iterated over the whole pokes schedule instead of the current row, used an else (pokes are independent), and hardcoded indices.
+Set poke → Inhib weight to −400 (should be +300).
+Known issues (later)
+Verilog: 16-bit total/voltage with no saturation (will wrap with many inputs); no voltage floor.
+One module instance per neuron doesn't scale to 302 → time-multiplexed core with voltages + synapse lists in memory.
+Next steps
+Finish the poke loop (test: row = [1, 1] → [300, 0, 0, 300]).
+Wrap neuron + poke loops into compute_totals(last_spikes, row).
+Plug into the main loop; confirm all six golden .txt files are identical to before.
+Then: load the real connectome (Claude writes the parser; I decide weight scaling, excitatory vs. inhibitory, gap junctions).
