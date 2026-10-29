@@ -15,3 +15,6 @@ desktop.ini
 
 # Downloaded outside data (check sharing rules before committing)
 data/raw/
+
+# Golden-file copies the notebook writes on each run (official ones live in data/)
+python/chain_*.txt
