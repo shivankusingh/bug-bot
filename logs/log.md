@@ -208,3 +208,51 @@ Picked **`PIPE_K = 1`**: works both ways, stops right after each poke, far from 
 1. Optional test: poke head and tail at the same time (`[1,1]`) and see which team wins the race.
 2. Roadmap step 4: local Verilog sim flow (Icarus/Verilator + cocotb + Surfer/GTKWave).
 3. Pipes (flow + spike packages) still need to go into Verilog, then new golden files.
+
+
+# bug-bot log: Oct 29, 2026 (part 2): motors
+
+## Summary
+Checked whether the decision actually reaches the muscles. It didn't: the command neurons chose correctly, but the backward motors never fired. Fixed it by restructuring my sign rules into one data-driven **circuit rule**, plus one-way command → motor links. Now head touch → backward motors, tail touch → forward motors, and the brain is quiet after each poke.
+
+## What I did
+- Added a motor panel to the plot ("Do the motors follow?"): VA/DA = backward motors, VB/DB = forward motors.
+- Found that AVAL (backward command) → DA05 (backward motor) was −140: the table said "complex", and my blanket "complex = −" turned teammates into brakes again.
+- Replaced the touch rule and team rule with one table + one rule:
+  - `CIRCUIT`: a tag for 53 known neurons, `(team, layer)`. Team = which direction it pushes; layer = SENSOR, COMMAND or MOTOR (named numbers 0, 1, 2).
+  - `circuit_rule`: no tag → None; upstream → None; same layer that isn't COMMAND → None; then same team → +, opposite → −.
+  - Tested it on 9 cases until 9/9 passed. Before vs after: only 54 motor links changed sign; every sensor → command and command ↔ command sign stayed the same.
+- Forward motors were still weak: AVB (forward command) reaches its motors mostly through pipes, which are tiny at `PIPE_K = 1`. Added one-way "circuit pipe" links: for each pipe between a command neuron and a motor on its own team, the parser also adds `command → motor, size × K` to `connections` (75 links).
+
+## Experiments: getting the forward motors to fire (tail poke)
+| Fix tried | Forward motors | Wrong side | Calms down? |
+|---|---|---|---|
+| Nothing (`PIPE_K = 1`) | 5 | 0 | ✅ |
+| `PIPE_K = 3` everywhere | 77 | 317 | ❌ runaway |
+| Cap each pipe package | 217+ | 420 | ❌ runaway |
+| Stronger command ↔ motor pipes only (two-way) | 26 | 308 | ❌ motors push back up |
+| **One-way command → motor links** | **54** | **1** | ✅ |
+| One-way links for all downstream same-team pipes (incl. sensor → command) | 76 | 3 | ✅ but backward got even stronger (151) |
+
+Picked the narrow one-way version. Backward motors still respond about 2x more than forward (144 vs 68 spikes), because AVA (backward command) has very dense chemical wiring to its motors. I left it: both directions are correct, and forcing them equal would be overfitting to one test. The robot readout can normalize per group instead.
+
+## What I learned
+- **Motor neurons are still neurons:** they take inputs (from commands) and send outputs (to muscles and to other motors). Muscles aren't in my model; the robot code will play that role.
+- **Motor names:** D/V = dorsal or ventral muscles, A = backward, B = forward, the number = position along the body.
+- **Data vs knowledge:** the table can't sign "complex" links, and no blanket guess works (tested +, −, and majority of tags). Known neuron jobs have to fill the gap.
+- **Tags as data, one rule:** adding a sense later = adding rows to `CIRCUIT`, not new code. Same idea scales to the fly, where tags would come from a file.
+- **Layer decides whether the rule speaks; team decides the sign.** Only downstream (and command ↔ command), so the rule never overrides the table for motor → motor (body wave) or creates upstream feedback loops.
+- **Ping-pong needs a strong push in both directions.** One-way links are safe because the return path stays weak. Activity can still spread indirectly (motors firing more → more pushback), so the margin matters: about 240 vs the 256 threshold.
+- **A function that reaches the end without `return` gives `None`**, which hid bugs in my first versions of `circuit_rule`.
+- Order of checks matters: check "no tag" before comparing layers, or `None > 0` crashes.
+- Save the file before Claude edits it, or the editor shows a save conflict (and "Overwrite" can undo the other edit).
+
+## Mistakes I made (and fixed)
+- First `circuit_rule` always returned + or −, so it would have overridden the table for every link in the brain (and crashed on two untagged neurons).
+- Mixed up direction and sign: returned − for upstream links. Upstream should be None; − only means opposite teams.
+- Forgot the same-team case at the end, so it fell off the end and returned None.
+
+## Next steps
+1. Motor readout: turn motor spikes into wheel direction + speed (normalize by group size).
+2. 16-bit safety inside `neuron_model`.
+3. Golden files for the full network, then the Verilog sim flow.

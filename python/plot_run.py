@@ -5,10 +5,12 @@ Use from a notebook in python/, after your loop has filled all_voltages and all_
     from plot_run import plot_run
     plot_run(all_voltages, all_spikes, neurons, pokes)
 
-Three panels share the same step axis:
+Panels share the same step axis:
     1. Raster: one row per neuron, a mark on every step it fired.
-    2. Decision: how many backward vs forward neurons fired each step.
-    3. Voltage map: every neuron's voltage each step (blue = pushed up, red = held down).
+    2. Decision: how many backward vs forward command neurons fired each step.
+    3. Motors (only if the network has motor neurons): how many backward (VA/DA)
+       vs forward (VB/DB) motor neurons fired each step.
+    4. Voltage map: every neuron's voltage each step (blue = pushed up, red = held down).
 Shaded columns are the steps a poke was on.
 """
 import matplotlib.pyplot as plt
@@ -22,6 +24,9 @@ GROUPS = {
     "forward": ["AVBL", "AVBR", "PVCL", "PVCR"],
 }
 POKE_NAMES = ["head poked", "tail poked"]
+
+# Motor neurons, matched by name prefix: VA/DA drive backward, VB/DB drive forward.
+MOTOR_PREFIXES = {"backward": ("VA", "DA"), "forward": ("VB", "DB")}
 
 # Colors (validated categorical pair + neutral ink; light surface)
 SURFACE = "#fcfcfb"
@@ -80,6 +85,12 @@ def plot_run(all_voltages, all_spikes, neurons, pokes, title="Touch test", save_
     `only`, it draws just the 14 touch-circuit neurons."""
     if any(row is all_voltages[0] for row in all_voltages[1:]):
         raise ValueError("all_voltages rows are the same list: append voltages.copy() in your loop")
+    # Motor counts come from the full network, before `only` narrows the rows.
+    motor_counts = {}
+    for group, prefixes in MOTOR_PREFIXES.items():
+        idx = [i for i, name in enumerate(neurons) if name[:2] in prefixes]
+        if idx:
+            motor_counts[group] = (len(idx), [sum(row[i] for i in idx) for row in all_spikes])
     if only is None and len(neurons) > 40:
         only = [name for members in GROUPS.values() for name in members]
     if only is not None:
@@ -91,9 +102,14 @@ def plot_run(all_voltages, all_spikes, neurons, pokes, title="Touch test", save_
     steps = len(all_voltages)
     n = len(neurons)
 
-    fig, (ax_r, ax_d, ax_v) = plt.subplots(
-        3, 1, figsize=(11, 10), sharex=True, facecolor=SURFACE,
-        gridspec_kw={"height_ratios": [n, 5, n], "hspace": 0.35})
+    if motor_counts:
+        fig, (ax_r, ax_d, ax_m, ax_v) = plt.subplots(
+            4, 1, figsize=(11, 12.5), sharex=True, facecolor=SURFACE,
+            gridspec_kw={"height_ratios": [n, 5, 5, n], "hspace": 0.35})
+    else:
+        fig, (ax_r, ax_d, ax_v) = plt.subplots(
+            3, 1, figsize=(11, 10), sharex=True, facecolor=SURFACE,
+            gridspec_kw={"height_ratios": [n, 5, n], "hspace": 0.35})
     fig.suptitle(title, x=0.06, y=0.95, ha="left", fontsize=14, color=INK, fontweight="bold")
 
     # 1. Raster ---------------------------------------------------------------
@@ -134,9 +150,26 @@ def plot_run(all_voltages, all_spikes, neurons, pokes, title="Touch test", save_
     ax_d.set_ylabel("neurons firing", fontsize=9, color=INK_2)
     ax_d.grid(axis="y", color=GRID, lw=0.8)
     ax_d.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8.5, frameon=False, labelcolor=INK_2)
-    ax_d.set_title("2. Which way is winning", loc="left", fontsize=11, color=INK)
+    ax_d.set_title("2. Which way is winning (command neurons)", loc="left", fontsize=11, color=INK)
 
-    # 3. Voltage map --------------------------------------------------------------
+    # 3. Motors (only when the network has motor neurons) ------------------------
+    if motor_counts:
+        _style(ax_m)
+        _shade_pokes(ax_m, pokes)
+        for group, color in (("backward", BACKWARD_COLOR), ("forward", FORWARD_COLOR)):
+            if group in motor_counts:
+                size, counts = motor_counts[group]
+                prefixes = "/".join(MOTOR_PREFIXES[group])
+                ax_m.step(x, counts, where="mid", color=color, lw=2,
+                          label=f"{group} motors, {prefixes} ({size} neurons)")
+        top = max(max(counts) for _, counts in motor_counts.values())
+        ax_m.set_ylim(-0.3, max(4, top) + 0.5)
+        ax_m.set_ylabel("neurons firing", fontsize=9, color=INK_2)
+        ax_m.grid(axis="y", color=GRID, lw=0.8)
+        ax_m.legend(loc="upper left", bbox_to_anchor=(1.0, 1.0), fontsize=8.5, frameon=False, labelcolor=INK_2)
+        ax_m.set_title("3. Do the motors follow?", loc="left", fontsize=11, color=INK)
+
+    # Voltage map -----------------------------------------------------------------
     _style(ax_v)
     columns = [[all_voltages[s][i] for s in range(steps)] for i in range(n)]
     image = ax_v.imshow(columns, aspect="auto", cmap=VOLTAGE_CMAP, interpolation="nearest",
@@ -144,9 +177,10 @@ def plot_run(all_voltages, all_spikes, neurons, pokes, title="Touch test", save_
                         extent=(-0.5, steps - 0.5, n - 0.5, -0.5))
     ax_v.set_yticks(range(n), neurons, fontsize=8.5)
     ax_v.set_xlabel("step (one tick of your loop)", fontsize=9, color=INK_2)
-    ax_v.set_title("3. Voltage after each step (squares are 0 right after a spike resets)",
+    ax_v.set_title(f"{4 if motor_counts else 3}. Voltage after each step (squares are 0 right after a spike resets)",
                    loc="left", fontsize=11, color=INK)
-    bar = fig.colorbar(image, ax=[ax_r, ax_d, ax_v], location="bottom", shrink=0.45,
+    axes = [ax_r, ax_d, ax_m, ax_v] if motor_counts else [ax_r, ax_d, ax_v]
+    bar = fig.colorbar(image, ax=axes, location="bottom", shrink=0.45,
                        pad=0.07, aspect=40)
     bar.set_ticks([-VOLTAGE_LIMIT, -128, 0, 128, 256])
     bar.set_ticklabels([f"≤ −{VOLTAGE_LIMIT}  held down", "−128", "0", "128", "256 threshold"])

@@ -30,7 +30,7 @@ SIGN_FILE = REPO / "data" / "raw" / "fenyves2020_S1_Data.xlsx"
 
 # ---- Your decisions ----
 K = 10                                   # Q2: weight = size * K
-SIGN_ORDER = ["team", "touch", "table", "gaba"]  # Q3: the first rule with an answer wins
+SIGN_ORDER = ["circuit", "table", "gaba"]  # Q3: the first rule with an answer wins
 
 # Q1: the touch circuit, grouped by role
 HEAD_TOUCH = ["ALML", "ALMR", "AVM"]
@@ -38,6 +38,24 @@ TAIL_TOUCH = ["PLML", "PLMR", "PVM"]
 BACKWARD = ["AVAL", "AVAR", "AVDL", "AVDR"]
 FORWARD = ["AVBL", "AVBR", "PVCL", "PVCR"]
 TOUCH_CIRCUIT = HEAD_TOUCH + TAIL_TOUCH + BACKWARD + FORWARD
+BACKWARD_MOTOR = [f"DA{i:02d}" for i in range(1, 10)] + [f"VA{i:02d}" for i in range(1, 13)]
+FORWARD_MOTOR = [f"DB{i:02d}" for i in range(1, 8)] + [f"VB{i:02d}" for i in range(1, 12)]
+
+# Circuit tags: neuron -> (team, layer). Neurons without a tag are left to the other rules.
+#   team  = which direction the neuron pushes the worm
+#   layer = where it sits in the chain; a smaller number is further upstream
+SENSOR, COMMAND, MOTOR = 0, 1, 2         # layers, in the order messages flow
+CIRCUIT = {}
+for names, team, layer in [
+    (HEAD_TOUCH, "backward", SENSOR),        # head touch -> worm backs up
+    (TAIL_TOUCH, "forward", SENSOR),         # tail touch -> worm goes forward
+    (BACKWARD, "backward", COMMAND),
+    (FORWARD, "forward", COMMAND),
+    (BACKWARD_MOTOR, "backward", MOTOR),
+    (FORWARD_MOTOR, "forward", MOTOR),
+]:
+    for name in names:
+        CIRCUIT[name] = (team, layer)
 
 INT16_MAX = 32767
 
@@ -102,43 +120,46 @@ def read_sign_table(workbook):
 
 # ---------------------------------------------------------------- signs
 
-def touch_rule(sender, receiver):
-    """Chalfie et al. 1985: touch -> opposite-direction decision neuron is '-'."""
-    if sender in HEAD_TOUCH and receiver in FORWARD:
-        return "-"
-    if sender in TAIL_TOUCH and receiver in BACKWARD:
-        return "-"
-    return None  # the rule has nothing to say about this connection
 
-def team_rule(sender, receiver):
-    """Team rule: if sender is in the same team as the receiver, return +, oposite team is -. else it is NONE."""
-    if sender in BACKWARD and receiver in BACKWARD:
-        return "+"
-    if sender in FORWARD and receiver in FORWARD:
-        return "+"
-    if sender in BACKWARD and receiver in FORWARD:
-        return "-"
-    if sender in FORWARD and receiver in BACKWARD:
-        return "-"
-    return None  # the rule has nothing to say about this connection
 
 def decide_sign(sender, receiver, sign_table, gaba):
     """Return (sign, rule that decided it, what the table said)."""
     table_says = sign_table.get((sender, receiver), ("missing", []))[0]
     for rule in SIGN_ORDER:
+        if rule == "circuit" and circuit_rule(sender, receiver):
+            return circuit_rule(sender, receiver), "circuit", table_says
         if rule == "table" and table_says in ("+", "-"):
             return table_says, "table", table_says
         if rule == "table" and table_says == "complex":
             return "-", "table", table_says
-        if rule == "touch" and touch_rule(sender, receiver):
-            return touch_rule(sender, receiver), "touch", table_says
         if rule == "gaba":
             return ("-" if sender in gaba else "+"), "gaba", table_says
-        if rule == "team" and team_rule(sender, receiver):
-            return team_rule(sender, receiver), "team", table_says
     raise ValueError("SIGN_ORDER must include 'gaba' so every connection gets a sign")
 
 
+def drives_through_pipe(sender, receiver):
+    """Command neuron -> a motor on its own team: their pipe also carries a one-way push."""
+    if sender not in CIRCUIT or receiver not in CIRCUIT:
+        return False
+    team_sender, layer_sender = CIRCUIT[sender]
+    team_receiver, layer_receiver = CIRCUIT[receiver]
+    return layer_sender == COMMAND and layer_receiver == MOTOR and team_sender == team_receiver
+
+def circuit_rule(sender, receiver):
+    """Circuit rule: if sender and receiver are in the same circuit, return +, otherwise -."""
+    team_sender, layer_sender = CIRCUIT.get(sender, (None, None))
+    team_receiver, layer_receiver = CIRCUIT.get(receiver, (None, None))
+    
+    if team_sender is None or team_receiver is None:
+        return None  # the rule has nothing to say about this connection
+    if layer_sender>layer_receiver:
+        return None
+    if layer_sender==layer_receiver and layer_sender!=1:
+        return None
+    if team_sender != team_receiver :
+        return "-"
+    if team_sender == team_receiver:
+        return "+"
 
 
 # ---------------------------------------------------------------- building
@@ -158,8 +179,6 @@ def build(neurons, chem_sizes, gap_sizes, sign_table, gaba):
             connections[index[sender]].append(dict(
                 receiver=receiver, weight=weight, size=size,
                 sign=sign, rule=rule, table_says=table_says))
-    for outgoing in connections:
-        outgoing.sort(key=lambda c: index[c["receiver"]])
 
     pipes = {}
     mismatches = []
@@ -169,6 +188,18 @@ def build(neurons, chem_sizes, gap_sizes, sign_table, gaba):
             if pair in pipes and pipes[pair] != size:
                 mismatches.append((pair, pipes[pair], size))
             pipes[pair] = size  # the symmetric sheet lists each pair twice
+
+    # A command neuron drives its own motors through their pipe too. Add that as a
+    # one-way connection (command -> motor, size * K) so the motors can't push back.
+    for (a, b), size in pipes.items():
+        for sender, receiver in ((a, b), (b, a)):
+            if drives_through_pipe(sender, receiver):
+                connections[index[sender]].append(dict(
+                    receiver=receiver, weight=size * K, size=size,
+                    sign="+", rule="circuit pipe", table_says="(pipe)"))
+
+    for outgoing in connections:
+        outgoing.sort(key=lambda c: index[c["receiver"]])
     return connections, pipes, mismatches
 
 
@@ -178,7 +209,8 @@ def write_module(path, neurons, connections, pipes):
     out = [
         "# GENERATED by python/connectome_parser.py. Don't edit by hand: rerun the parser.",
         "# Wiring: Cook et al. 2019 SI 5 (corrected July 2020).",
-        "# Signs: Fenyves et al. 2020 S1 Data, touch rule (Chalfie et al. 1985), GABA rule.",
+        "# Signs: circuit rule (touch part: Chalfie et al. 1985), Fenyves et al. 2020 S1 Data, GABA rule.",
+        "# 'circuit pipe' entries: one-way command -> own-motor drive, added from their pipe.",
         f"# Settings: K = {K}, sign order = {' -> '.join(SIGN_ORDER)}",
         "",
         f"N = {len(neurons)}",
@@ -200,7 +232,7 @@ def write_module(path, neurons, connections, pipes):
         out.append(f"    [  # {i} {neurons[i]}")
         for c in outgoing:
             entry = f"({c['receiver']}, {c['weight']}),"
-            source = "table" if c["rule"] == "table" else c["rule"] + " rule"
+            source = c["rule"] if c["rule"] in ("table", "circuit pipe") else c["rule"] + " rule"
             out.append(f"        {entry:<16} # size {c['size']}, {c['sign']} from {source}")
         out.append("    ],")
     out += [
@@ -257,6 +289,8 @@ def report(neurons, connections, pipes, mismatches, chem_sizes, sign_table):
             n = sum(1 for _, c in flat if c["rule"] == rule and c["sign"] == sign)
             if n:
                 print(f"  {rule:<6} {sign} : {n}")
+    drive = sum(1 for _, c in flat if c["rule"] == "circuit pipe")
+    print(f"  circuit pipe + : {drive}   (one-way command -> own-motor drive, from pipes)")
     for said in ("complex", "none", "missing"):
         n = sum(1 for _, c in flat if c["table_says"] == said)
         print(f"  table had no clear sign ({said}): {n}")
@@ -266,19 +300,25 @@ def report(neurons, connections, pipes, mismatches, chem_sizes, sign_table):
 
     print()
     print("=" * 74)
-    print("3. SAFETY NET: every touch -> decision-neuron chemical connection")
+    print("3. SAFETY NET: chemical links the circuit rule decided")
     print("=" * 74)
-    print(f"  {'link':<12} {'size':>4}  {'table':<8} {'touch rule':<10} {'final':<5} {'decided by':<10} note")
+    layer_name = {SENSOR: "sensor", COMMAND: "command", MOTOR: "motor"}
+    counts = {}
+    overruled = []
     for sender, c in flat:
-        if sender in HEAD_TOUCH + TAIL_TOUCH and c["receiver"] in BACKWARD + FORWARD:
-            rule_says = touch_rule(sender, c["receiver"]) or "(none)"
-            note = ""
-            if rule_says == "-" and c["table_says"] == "+":
-                note = "DISAGREE: table says +, Chalfie says -"
-            elif rule_says == "-" and c["rule"] == "touch":
-                note = f"table {c['table_says']}, so touch rule used"
-            print(f"  {sender + '->' + c['receiver']:<12} {c['size']:>4}  {c['table_says']:<8} "
-                  f"{rule_says:<10} {c['sign']:<5} {c['rule']:<10} {note}")
+        if c["rule"] == "circuit":
+            kind = (f"{CIRCUIT[sender][0]} {layer_name[CIRCUIT[sender][1]]}",
+                    f"{CIRCUIT[c['receiver']][0]} {layer_name[CIRCUIT[c['receiver']][1]]}", c["sign"])
+            counts[kind] = counts.get(kind, 0) + 1
+            if c["table_says"] in ("+", "-") and c["table_says"] != c["sign"]:
+                overruled.append((sender, c))
+    print(f"  {'from':<18} {'to':<18} {'sign':<5} links")
+    for (frm, to, sign), n in sorted(counts.items()):
+        print(f"  {frm:<18} {to:<18} {sign:<5} {n}")
+    print(f"\n  circuit rule overruled a clear table sign on {len(overruled)} links:")
+    for sender, c in sorted(overruled, key=lambda sc: -sc[1]["size"]):
+        print(f"    {sender + '->' + c['receiver']:<12} size {c['size']:>3}: table {c['table_says']}, "
+              f"circuit {c['sign']}")
 
     print()
     print("  Rough first push (signed sizes of direct links, pipes counted as +).")
