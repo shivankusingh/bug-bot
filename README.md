@@ -19,7 +19,7 @@ implemented as a spiking neural network on an FPGA and driving a small robot.
 - [x] 4-neuron network in Python: excitatory chain A → B → C plus an inhibitory interneuron
 - [ ] 4-neuron network in Verilog
 - [ ] Run on real FPGA hardware (Vivado)
-- [ ] Load real C. elegans wiring (touch-withdrawal circuit first)
+- [x] Load real C. elegans wiring (touch-withdrawal circuit first)
 - [ ] Full 302-neuron brain in hardware
 - [ ] Sensors + motors: robot reacts to touch
 

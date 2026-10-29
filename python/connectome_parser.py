@@ -29,8 +29,8 @@ COOK_FILE = REPO / "data" / "raw" / "cook2019_SI5_corrected_July2020.xlsx"
 SIGN_FILE = REPO / "data" / "raw" / "fenyves2020_S1_Data.xlsx"
 
 # ---- Your decisions ----
-K = 43                                   # Q2: weight = size * K
-SIGN_ORDER = ["touch", "table", "gaba"]  # Q3: the first rule with an answer wins
+K = 10                                   # Q2: weight = size * K
+SIGN_ORDER = ["team", "touch", "table", "gaba"]  # Q3: the first rule with an answer wins
 
 # Q1: the touch circuit, grouped by role
 HEAD_TOUCH = ["ALML", "ALMR", "AVM"]
@@ -110,6 +110,17 @@ def touch_rule(sender, receiver):
         return "-"
     return None  # the rule has nothing to say about this connection
 
+def team_rule(sender, receiver):
+    """Team rule: if sender is in the same team as the receiver, return +, oposite team is -. else it is NONE."""
+    if sender in BACKWARD and receiver in BACKWARD:
+        return "+"
+    if sender in FORWARD and receiver in FORWARD:
+        return "+"
+    if sender in BACKWARD and receiver in FORWARD:
+        return "-"
+    if sender in FORWARD and receiver in BACKWARD:
+        return "-"
+    return None  # the rule has nothing to say about this connection
 
 def decide_sign(sender, receiver, sign_table, gaba):
     """Return (sign, rule that decided it, what the table said)."""
@@ -117,11 +128,17 @@ def decide_sign(sender, receiver, sign_table, gaba):
     for rule in SIGN_ORDER:
         if rule == "table" and table_says in ("+", "-"):
             return table_says, "table", table_says
+        if rule == "table" and table_says == "complex":
+            return "-", "table", table_says
         if rule == "touch" and touch_rule(sender, receiver):
             return touch_rule(sender, receiver), "touch", table_says
         if rule == "gaba":
             return ("-" if sender in gaba else "+"), "gaba", table_says
+        if rule == "team" and team_rule(sender, receiver):
+            return team_rule(sender, receiver), "team", table_says
     raise ValueError("SIGN_ORDER must include 'gaba' so every connection gets a sign")
+
+
 
 
 # ---------------------------------------------------------------- building
@@ -322,7 +339,7 @@ def report(neurons, connections, pipes, mismatches, chem_sizes, sign_table):
     print("6. CHECK BY HAND: open the spreadsheets and compare")
     print("=" * 74)
     picks = []
-    for rule in ("table", "touch", "gaba"):
+    for rule in SIGN_ORDER:
         options = [(s, c) for s, c in flat if c["rule"] == rule]
         if options:
             picks.append(max(options, key=lambda sc: sc[1]["size"]))

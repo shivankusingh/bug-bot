@@ -147,3 +147,64 @@ Picked bug-bot back up after a break. Started refactoring the Python reference m
 2. Wrap neuron + poke loops into `compute_totals(last_spikes, row)`.
 3. Plug into the main loop; confirm all six golden `.txt` files are identical to before.
 4. Then: load the real connectome (Claude writes the parser; I decide weight scaling, excitatory vs. inhibitory, gap junctions).
+
+
+# bug-bot log: Oct 28–29, 2026
+
+## Summary
+Loaded the real C. elegans connectome (300 neurons) into my Python model and got the touch test working in both directions: **head touch → the worm backs up, tail touch → it goes forward, and the brain goes quiet after each poke.** Getting there took a chain of experiments to track down a runaway where almost the whole brain locked on.
+
+## What I did
+- Added pipes (gap junctions) to my model: flow is computed from start-of-step voltages and written into `totals`, once per pipe, so charge is conserved.
+- Claude wrote `connectome_parser.py` (Cook 2019 wiring + Fenyves 2020 signs). My decisions: weight = size × K, which rule decides each sign (`SIGN_ORDER`), the touch rule from Chalfie 1985.
+- Wrote `touch_test.ipynb`: pokes into the touch sensors (ALML/ALMR/AVM for the head, PLML/PLMR/PVM for the tail), saving every step's voltages and spikes, and plotting with `plot_run.py`.
+- Ran experiments to find and fix the runaway (tables below).
+- Added my own **team rule** to the parser: between the 8 decision neurons, same team → +, opposite team → −.
+- Added **spike packages to pipes**: when a neuron fires, each pipe partner gets `+size × PIPE_K` on the next step.
+
+## Experiments: head touch
+| # | K | "complex" links | Team rule | Result |
+|---|---|---|---|---|
+| 0 | 43 | + (fell to GABA rule) | ✗ | runaway: ~230 / 300 firing by step 5, all decision neurons locked on |
+| 1 | 10 | + | ✗ | forward stayed off during the poke, but runaway after release |
+| 2 | 43 | − | ✗ | smaller runaway: ~175 / 300 firing forever |
+| 3 | 10 | − | ✗ | quiet after the poke, forward off, but backward almost silent (AVAL 1 spike, AVAR 0) |
+| 4 | 10 | − | ✓ | **head → backward only (AVAL 6, AVAR 6), forward 0, quiet by step 24** ✅ |
+
+Run 3's problem: AVD → AVA links were "complex", so the blanket guess made them brakes (AVDR → AVAR = −520). Two backward neurons were shutting each other down. The team rule fixed it (+520).
+
+## Experiments: head + tail (80 steps), sweeping PIPE_K
+| `PIPE_K` | Head: back / fwd spikes | Tail: back / fwd spikes | Quiet after tail? |
+|---|---|---|---|
+| 0 (no packages) | 12 / 0 | 0 / 2 | ✅ but tail too weak |
+| 1 | 20 / 0 | 0 / 27 | ✅ by step 62 |
+| 2 | 28 / 0 | 0 / 48 | ✅ by step 70 |
+| 3 | 40 / 0 | 0 / 61 | ❌ runaway |
+| 10 | 60 / 43 | 80 / 80 | ❌ runaway |
+
+Picked **`PIPE_K = 1`**: works both ways, stops right after each poke, far from the runaway edge, and in hardware the package is just the raw size (no multiply).
+
+## What I learned
+- **Positive feedback loop:** the decision neurons were wired with all-+ loops, so once a few fired they kept firing each other forever. The network had ~3,100 + links and only ~550 − links, so almost no brakes.
+- **Keys and locks:** the sender releases a chemical (key: ACh, Glu, GABA); the receiver has go locks (+) and stop locks (−). The sign table only says which locks *exist* (yes/no), not how many, so "complex" (both kinds) can't be resolved from the data.
+- **Blanket guess:** one answer for every unknown link. It isn't accurate link by link; it's a default and a quick test of whether that group matters. Using "+" for complex was already a blanket guess.
+- **Known rules beat blanket guesses** for the links that matter most (touch rule, team rule); the blanket only covers what's left.
+- **`SIGN_ORDER` is the hierarchy, not the order of the `if`s:** each loop turn has one rule name, so only that rule's `if` can match. The first rule with an answer wins (`return` ends the function).
+- **K lives in the parser:** chemical weights are pre-multiplied (size 12 × 10 = 120) and stored finished, like the FPGA's memory will be. Pipes stay raw-size, so the notebook scales them with `PIPE_K`.
+- **Leveling-off rule:** with leak `v >> 3`, a steady input settles near **8 × input**. So any neuron getting a steady +32 or more per step eventually fires, however small K is. That's why lowering K only delayed the runaway.
+- **Why pipes needed spike packages:** a firing neuron resets to 0, so its pipes see an "empty tank" and pass nothing. The tail sensors reach forward mostly through pipes, so tail touch was weak. This comes from LIF's reset (real worm neurons mostly use graded potentials), not a coding bug.
+- **Ping-pong:** pipes are two-way and always +, so if `size × PIPE_K ≥ 256` two neurons can fire each other forever (PVCL ↔ PVCR, size 67). That's why `PIPE_K` must be tiny.
+- **Tipping point:** PVCR was already settling at 160 from PVM alone; the pipe's +8 per step pushed it to ~224, and small extra inputs tipped it over. A small change can matter a lot near threshold.
+- Change one knob at a time, predict before running, and compare against the last run.
+
+## Mistakes I made (and fixed)
+- Pipe loop first wrote into `voltages` (order-dependent); fixed to write into `totals`.
+- Forgot `.copy()` when saving voltages, so every saved row was the same list.
+- Notebook kept using the old `connectome_all.py` after regenerating it: restart the kernel after rerunning the parser.
+- Edited the existing table line in `decide_sign` instead of adding a new `if` (it returned 4 values instead of 3 and would have made every table link −).
+- Nested two poke schedules inside one list instead of joining them with `+`, so nothing got poked.
+
+## Next steps
+1. Optional test: poke head and tail at the same time (`[1,1]`) and see which team wins the race.
+2. Roadmap step 4: local Verilog sim flow (Icarus/Verilator + cocotb + Surfer/GTKWave).
+3. Pipes (flow + spike packages) still need to go into Verilog, then new golden files.
