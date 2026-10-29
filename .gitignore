@@ -12,3 +12,6 @@ __pycache__/
 # Windows
 Thumbs.db
 desktop.ini
+
+# Downloaded outside data (check sharing rules before committing)
+data/raw/
