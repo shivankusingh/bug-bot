@@ -18,3 +18,7 @@ data/raw/
 
 # Golden-file copies the notebook writes on each run (official ones live in data/)
 python/chain_*.txt
+
+# Simulation output (rebuilt on every test run)
+verilog/sim_build/
+verilog/results.xml

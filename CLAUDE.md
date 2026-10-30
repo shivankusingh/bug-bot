@@ -30,11 +30,13 @@ Running the C. elegans connectome (302 neurons) as a spiking neural network on a
 - `data/`: golden vectors and connectome data files (`data/raw/` holds the downloaded spreadsheets; ignored by git)
 - `logs/`: day-by-day project log
 - `docs/`: the demo website, published by GitHub Pages (`index.html` = visualizer, `run.json` = a model run). `run.json` is written by `python/export_web.py` from `touch_test.ipynb`; rerun that cell whenever the model changes.
-- Python runs via `.venv/bin/python` (local virtual environment with numpy, matplotlib and openpyxl; ignored by git).
+- Python runs via `.venv/bin/python` (local virtual environment with numpy, matplotlib, openpyxl and cocotb; ignored by git).
+- Simulation tools (Homebrew): Icarus Verilog 13 (`iverilog`, `vvp`), Surfer waveform viewer (`surfer`). cocotb runs Icarus through `cocotb_tools.runner`; pass `timescale=("1ns", "1ps")` since the Verilog files don't declare one.
 
 ## Current state
 - 4-neuron test network: A → B → C chain, plus inhibitory neuron I onto B.
 - Verilog: `lif_neuron` module (3 weighted inputs, parameters for weights) instantiated 4 times in `top_module`, hand-wired. Passes a self-checking testbench against Python golden vectors.
+- Verilog, scalable core (in progress): `lif_math.v` = the neuron update as pure math (only `assign`, no memory inside; inputs `old_voltage`, `total`; outputs `new_voltage`, `spike`; includes the −512 floor). Verified against Python `neuron_model` by `verilog/test_lif_math.py` (cocotb, 27,648 cases incl. every edge). Run: `.venv/bin/python verilog/test_lif_math.py`.
 - Python reference model uses **sparse connection lists** and is verified to reproduce the original golden files exactly.
 - Real connectome loaded in Python: 300 neurons, 3,669 chemical connections + 75 one-way "circuit pipe" links, 1,087 pipes (Cook 2019 wiring, Fenyves 2020 signs). Settings: `K = 10`, `SIGN_ORDER = circuit → table → gaba`, table "complex" → −, `pipe_shift = 10`, `PIPE_K = 1`.
 - Sign rules: `CIRCUIT` tags 53 neurons with (team, layer): touch sensors, command neurons, motor neurons (DA/VA backward, DB/VB forward). `circuit_rule`: only downstream or command ↔ command; same team → +, opposite → −; anything else → None (table decides).
@@ -64,7 +66,7 @@ Any change to the Python model must reproduce the existing golden files exactly 
 
 ## Known issues
 - `neuron_model` is copied in two notebooks (`bug_bot.ipynb`, `touch_test.ipynb`); any math change must go into both. Possible later cleanup: one shared `neuron.py`.
-- Verilog: 16-bit `total`/`voltage` with no saturation, and **no voltage floor yet**. `lif_neuron.v` needs the floor (−512) to match Python again (doesn't affect the current 4-neuron golden files, whose lowest voltage is −400).
+- Verilog: 16-bit `total`/`voltage` with no saturation (a huge `total` would wrap around; Python never wraps). The old `lif_neuron.v` has **no voltage floor**; `lif_math.v` does and replaces it in the new core (doesn't affect the current 4-neuron golden files, whose lowest voltage is −400).
 - One module instance per neuron won't scale to 302.
 - Most real C. elegans neurons use graded potentials, not spikes. LIF is a deliberate simplification. Because a firing neuron resets to 0, pipes can't pass activity well; spike packages and circuit pipe links are workarounds.
 - Only one behavior test so far (head + tail touch). Risk of tuning to that one test (overfitting): add more tests before tuning further.
@@ -74,8 +76,8 @@ Any change to the Python model must reproduce the existing golden files exactly 
 1. ✅ Python model refactored to sparse connection lists.
 2. ✅ Load the real connectome (Cook et al. 2019 + Fenyves et al. 2020). Parser outputs the `connections` and `pipes` format.
 3. ✅ Sanity check: head touch → backward, tail touch → forward, in Python.
-4. ✅ Python reference done: motor readout, voltage floor (16-bit safe), full-network golden files. **Next:** demo website (my model exports runs, Claude builds the visualizer); then senses (nose touch first). Then local sim flow: Icarus/Verilator + cocotb (Python testbenches comparing against the model) + Surfer/GTKWave.
-5. Hardware: time-multiplexed core: one neuron-update unit looping over all neurons, voltages in BRAM, synapses in CSR format, two-phase timestep (deliver spikes, then update neurons), double-buffered spike flags. First test: load the 4-neuron network from memory files and match its output.
+4. ✅ Python reference done: motor readout, voltage floor (16-bit safe), full-network golden files, demo website, local sim flow (Icarus + cocotb + Surfer). Senses (nose touch first) come later.
+5. Hardware: time-multiplexed core: one neuron-update unit (`lif_math.v` ✅: pure math, no memory inside) looping over all neurons. Memories in BRAM: `voltages`, `totals`, one `spikes` list, wiring as CSR (`LINKS` + `START`, `POKE_LINKS` + `POKE_START`) and a flat `PIPES` list. Two-phase step: phase 1 = clear totals, deliver spikes, deliver pokes, pipes (all into `totals`, reading start-of-step voltages and last step's spikes); phase 2 = update neurons (writes `voltages` and `spikes`). Phases never overlap, so one spike list is enough (no double buffering); overlapping phases is a possible later speed-up (maybe for the fly). External RAM only later, for the fly. First test: load the 4-neuron network from memory files and match its output.
 6. FPGA board + robot I/O (sensors → sensory neurons, motor neurons → motors), then RL.
 7. Later: scale to the fruit fly connectome.
 
