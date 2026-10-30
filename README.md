@@ -5,6 +5,9 @@ implemented as a spiking neural network on an FPGA and driving a small robot.
 
 **Status:** in progress (foundations phase)
 
+**Live demo:** [shivankusingh.github.io/bug-bot](https://shivankusingh.github.io/bug-bot/): a 3D view of the
+worm's 300 neurons. Poke the head or tail and watch the brain decide which way the robot moves.
+
 ## How it works
 - Each neuron is an integer **leaky integrate-and-fire (LIF)** model: voltage leaks each tick
   (`v - (v >> 3)`), adds weighted input spikes, fires at a threshold of 256, then resets.

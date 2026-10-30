@@ -29,6 +29,7 @@ Running the C. elegans connectome (302 neurons) as a spiking neural network on a
 - `verilog/`: RTL design files and testbenches
 - `data/`: golden vectors and connectome data files (`data/raw/` holds the downloaded spreadsheets; ignored by git)
 - `logs/`: day-by-day project log
+- `docs/`: the demo website, published by GitHub Pages (`index.html` = visualizer, `run.json` = a model run). `run.json` is written by `python/export_web.py` from `touch_test.ipynb`; rerun that cell whenever the model changes.
 - Python runs via `.venv/bin/python` (local virtual environment with numpy, matplotlib and openpyxl; ignored by git).
 
 ## Current state

@@ -1,0 +1,740 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta property="og:title" content="Bug-Bot">
+<meta property="og:description" content="The C. elegans connectome running as a spiking neural network: poke the worm and watch its brain decide which way the robot moves.">
+<title>Bug-Bot</title>
+<meta name="description" content="The C. elegans connectome running as a spiking neural network: poke the worm and watch its brain decide which way the robot moves.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Unbounded:wght@300;500;700&family=Instrument+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a full-bleed 3D brain hero with its controls overlaid, then a narrow reading column
+   that tells the story sense -> decide -> move, ending in data credits. One dark look by choice. */
+:root {
+  --bg: #010104;
+  --bg-raised: #08091a;
+  --line: #1c2036;
+  --fg: #e7eaf6;
+  --muted: #8b91ad;
+  --cyan: #2de2e6;
+  --magenta: #ff3ea5;
+  --neuron: #c9d1ff;
+  --font-display: "Unbounded", "Avenir Next", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Instrument Sans", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --gutter-l: max(16px, env(safe-area-inset-left, 0px));
+  --gutter-r: max(16px, env(safe-area-inset-right, 0px));
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+a { color: var(--fg); text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--fg) 40%, transparent); }
+a:hover { text-decoration-color: var(--cyan); }
+:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; }
+
+/* ---------- hero ---------- */
+.hero {
+  position: relative;
+  height: clamp(600px, 90vh, 940px);
+  overflow: hidden;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+#brain { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: pan-y; cursor: grab; }
+#brain:active { cursor: grabbing; }
+.hero-ui {
+  position: absolute; inset: 0;
+  display: grid; grid-template-rows: auto 1fr auto;
+  padding-block: 28px 18px;
+  padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+  pointer-events: none;
+}
+.hero-ui > * { pointer-events: none; }
+.hero-ui .interactive, .hero-ui button, .hero-ui input { pointer-events: auto; }
+.top { display: flex; justify-content: space-between; align-items: flex-start; gap: 24px; flex-wrap: wrap; }
+.eyebrow {
+  font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--muted); margin: 0 0 10px;
+}
+h1 {
+  font-family: var(--font-display); font-weight: 700;
+  font-size: clamp(44px, 8.4vw, 104px); line-height: .92; letter-spacing: -.02em;
+  margin: 0;
+  background: linear-gradient(100deg, var(--cyan) 0%, var(--fg) 45%, var(--magenta) 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.tagline { font-family: var(--font-display); font-weight: 300; font-size: clamp(16px, 2vw, 22px); margin: 10px 0 0; color: var(--fg); }
+.legend { display: grid; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); text-align: left; }
+.legend span { display: inline-flex; align-items: center; gap: 10px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; flex: none; }
+.dot.b { background: var(--cyan); box-shadow: 0 0 10px var(--cyan); }
+.dot.f { background: var(--magenta); box-shadow: 0 0 10px var(--magenta); }
+.dot.o { background: var(--neuron); box-shadow: 0 0 8px color-mix(in srgb, var(--neuron) 70%, transparent); }
+.legend .hint { margin-top: 4px; font-size: 11px; color: color-mix(in srgb, var(--muted) 80%, transparent); }
+
+.bottom { display: grid; gap: 14px; align-self: end; }
+.status-row { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px; flex-wrap: wrap; }
+.phase { font-family: var(--font-mono); font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); min-width: 0; }
+.phase strong { color: var(--fg); font-weight: 500; }
+
+.robot {
+  width: 248px; padding: 12px 14px 10px;
+  background: color-mix(in srgb, var(--bg-raised) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 6px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.robot svg { width: 100%; height: auto; display: block; overflow: visible; }
+.robot-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; margin-top: 4px; }
+.robot-label .speed { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+.controls {
+  display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
+  padding: 12px 14px;
+  background: color-mix(in srgb, var(--bg-raised) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 6px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+}
+.btn {
+  font: 500 13px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase;
+  color: var(--fg); background: transparent;
+  border: 1px solid var(--line); border-radius: 4px;
+  padding: 10px 14px; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+.btn:hover { background: color-mix(in srgb, var(--fg) 6%, transparent); }
+.btn.head { border-color: color-mix(in srgb, var(--cyan) 60%, transparent); }
+.btn.head:hover { box-shadow: 0 0 18px -4px var(--cyan); }
+.btn.tail { border-color: color-mix(in srgb, var(--magenta) 60%, transparent); }
+.btn.tail:hover { box-shadow: 0 0 18px -4px var(--magenta); }
+.btn.icon { width: 40px; padding: 10px 0; text-align: center; }
+.timeline { display: flex; align-items: center; gap: 12px; flex: 1 1 260px; min-width: 0; }
+.timeline input { flex: 1; min-width: 0; }
+input[type="range"] { accent-color: var(--cyan); height: 20px; cursor: pointer; }
+.step { font-family: var(--font-mono); font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.speed-ctl { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+.speed-ctl input { width: 96px; }
+
+.tooltip {
+  position: absolute; z-index: 5; pointer-events: none;
+  padding: 8px 10px; min-width: 150px;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
+  background: color-mix(in srgb, var(--bg-raised) 92%, transparent);
+  border: 1px solid var(--line); border-radius: 4px;
+  transform: translate(14px, 14px);
+}
+.tooltip .name { font-size: 14px; font-weight: 500; color: var(--fg); }
+.tooltip .role { color: var(--muted); }
+.notice {
+  position: absolute; inset: 0; display: grid; place-items: center; text-align: center;
+  font-family: var(--font-mono); font-size: 13px; color: var(--muted);
+  padding-left: var(--gutter-l); padding-right: var(--gutter-r);
+}
+
+/* ---------- story ---------- */
+main { padding-left: var(--gutter-l); padding-right: var(--gutter-r); }
+.wrap { max-width: 1040px; margin: 0 auto; }
+section.story { padding-block: 88px 24px; display: grid; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); gap: 24px 56px; }
+section.story h2 {
+  font-family: var(--font-display); font-weight: 500; font-size: clamp(24px, 3vw, 32px);
+  line-height: 1.15; margin: 0; text-wrap: balance;
+}
+section.story .kicker { font-family: var(--font-mono); font-size: 12px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin: 0 0 12px; }
+.prose { max-width: 64ch; }
+.prose p { margin: 0 0 18px; color: color-mix(in srgb, var(--fg) 88%, var(--muted)); }
+.prose code, .mono { font-family: var(--font-mono); font-size: .86em; color: var(--fg); }
+
+.flow { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 0; counter-reset: flow; }
+.flow li { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 16px; padding: 18px 0; border-top: 1px solid var(--line); }
+.flow li::before {
+  counter-increment: flow; content: counter(flow, decimal-leading-zero);
+  font-family: var(--font-mono); font-size: 13px; color: var(--muted); padding-top: 3px;
+}
+.flow h3 { font-family: var(--font-display); font-weight: 500; font-size: 17px; margin: 0 0 6px; }
+.flow p { margin: 0; color: color-mix(in srgb, var(--fg) 85%, var(--muted)); }
+
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; margin: 0 0 28px; }
+.stat { background: var(--bg); padding: 18px 16px; }
+.stat .num { font-family: var(--font-display); font-weight: 500; font-size: clamp(22px, 3vw, 30px); font-variant-numeric: tabular-nums; }
+.stat .lbl { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
+.road { list-style: none; padding: 0; margin: 8px 0 0; display: grid; gap: 8px; }
+.road li { display: flex; align-items: baseline; gap: 12px; }
+.chip { font-family: var(--font-mono); font-size: 11px; letter-spacing: .08em; text-transform: uppercase; padding: 2px 8px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); flex: none; }
+.chip.done { color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 45%, transparent); }
+.chip.next { color: var(--magenta); border-color: color-mix(in srgb, var(--magenta) 45%, transparent); }
+
+footer { padding-left: var(--gutter-l); padding-right: var(--gutter-r); padding-block: 72px 56px; }
+footer .wrap { border-top: 1px solid var(--line); padding-top: 28px; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 24px 48px; }
+.credits { font-size: 14px; color: var(--muted); max-width: 70ch; }
+.credits p { margin: 0 0 10px; }
+.byline { font-family: var(--font-mono); font-size: 13px; display: grid; gap: 8px; align-content: start; justify-items: end; text-align: right; }
+.byline .who { color: var(--fg); }
+
+@media (max-width: 760px) {
+  .hero { height: clamp(640px, 92vh, 860px); }
+  .legend .hint { display: none; }
+  .legend { grid-auto-flow: column; gap: 14px; }
+  .robot { width: 200px; }
+  section.story { grid-template-columns: minmax(0, 1fr); padding-block: 64px 8px; }
+  .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  footer .wrap { grid-template-columns: minmax(0, 1fr); }
+  .byline { justify-items: start; text-align: left; }
+  .speed-ctl input { width: 80px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
+</style>
+<style>
+/* page reset (the preview host added these automatically) */
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px); }
+body { margin: 0; }
+img { max-width: 100%; }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<header class="hero" id="hero">
+  <canvas id="brain" aria-label="3D view of the worm's 300 neurons. Neurons flash and send sparks along their connections when they fire."></canvas>
+  <div class="notice" id="notice">Loading the connectome…</div>
+  <div class="tooltip" id="tooltip" hidden></div>
+  <div class="hero-ui">
+    <div class="top">
+      <div>
+        <p class="eyebrow">C. elegans connectome · 300 neurons · spiking model</p>
+        <h1>BUG-BOT</h1>
+        <p class="tagline">a worm's brain, wired into a robot</p>
+      </div>
+      <div class="legend">
+        <span><i class="dot b"></i>backward team</span>
+        <span><i class="dot f"></i>forward team</span>
+        <span><i class="dot o"></i>other neurons</span>
+        <span class="hint">drag to rotate · ctrl/⌘ + scroll to zoom</span>
+      </div>
+    </div>
+    <div></div>
+    <div class="bottom">
+      <div class="status-row">
+        <div class="phase" id="phase" aria-live="polite">Demo · <strong>poking the head</strong></div>
+        <div class="robot interactive" aria-label="Robot wheels">
+          <svg viewBox="0 0 220 104" role="img" aria-label="Robot driven by the worm's motor neurons">
+            <line id="ground" x1="0" y1="98" x2="220" y2="98" stroke="#2a2f4a" stroke-width="2" stroke-dasharray="10 8"></line>
+            <rect id="rearBump" x="34" y="48" width="8" height="22" rx="2" fill="#1c2036"></rect>
+            <rect id="frontBump" x="178" y="48" width="8" height="22" rx="2" fill="#1c2036"></rect>
+            <rect x="42" y="38" width="136" height="42" rx="8" fill="#0b0d1a" stroke="#e7eaf6" stroke-opacity=".75" stroke-width="1.5"></rect>
+            <path d="M88 38 a22 18 0 0 1 44 0" fill="#0b0d1a" stroke="#e7eaf6" stroke-opacity=".75" stroke-width="1.5"></path>
+            <circle id="brainLed" cx="110" cy="30" r="5" fill="#c9d1ff"></circle>
+            <text x="110" y="64" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="9" fill="#8b91ad" letter-spacing="1">HEAD →</text>
+            <g id="wheelL"><circle cx="72" cy="84" r="13" fill="#010104" stroke="#e7eaf6" stroke-width="1.5"></circle><path d="M72 73 V95 M61 84 H83" stroke="#e7eaf6" stroke-opacity=".6" stroke-width="1.5"></path></g>
+            <g id="wheelR"><circle cx="148" cy="84" r="13" fill="#010104" stroke="#e7eaf6" stroke-width="1.5"></circle><path d="M148 73 V95 M137 84 H159" stroke="#e7eaf6" stroke-opacity=".6" stroke-width="1.5"></path></g>
+          </svg>
+          <div class="robot-label"><span id="dirLabel">Stopped</span><span class="speed" id="speedLabel">speed 0</span></div>
+        </div>
+      </div>
+      <div class="controls interactive">
+        <button class="btn head" id="pokeHead" type="button">Poke head</button>
+        <button class="btn tail" id="pokeTail" type="button">Poke tail</button>
+        <button class="btn icon" id="play" type="button" aria-label="Pause">❚❚</button>
+        <div class="timeline">
+          <input type="range" id="scrub" min="0" max="79" value="0" step="1" aria-label="Simulation step">
+          <span class="step" id="stepLabel">step 0 / 79</span>
+        </div>
+        <label class="speed-ctl" for="speed">speed <input type="range" id="speed" min="0.25" max="3" step="0.25" value="1"> <span id="speedVal">1×</span></label>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <section class="story" id="how">
+      <div>
+        <p class="kicker">How it works</p>
+        <h2>From a touch to the wheels</h2>
+      </div>
+      <div class="prose">
+        <p>Every dot above is one of the worm's 300 neurons, and every faint line is a real connection mapped from electron microscope images. Nothing is scripted: each spark is a spike from my model traveling down one of those connections.</p>
+        <ol class="flow">
+          <li><div><h3>Touch</h3><p>A poke switches on the worm's touch sensors: ALML, ALMR and AVM at the head, PLML, PLMR and PVM at the tail.</p></div></li>
+          <li><div><h3>Neurons</h3><p>Each neuron is an integer leaky integrate-and-fire unit. Every step it loses an eighth of its voltage (<code>v − (v &gt;&gt; 3)</code>), adds its input, and fires when it reaches 256. Then it resets to 0. It can never drop below −512.</p></div></li>
+          <li><div><h3>Decision</h3><p>Four backward command neurons (AVA, AVD) and four forward ones (AVB, PVC) compete. A head touch drives the backward team and blocks the forward team. A tail touch does the opposite.</p></div></li>
+          <li><div><h3>Wheels</h3><p>The command neurons drive 21 backward and 18 forward motor neurons. A small readout turns their spikes into wheel speed with a leaky "muscle" that smooths out the bursts, so the robot backs away from a head touch and drives off from a tail touch.</p></div></li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="story" id="data">
+      <div>
+        <p class="kicker">The real data</p>
+        <h2>Wired from the actual worm</h2>
+      </div>
+      <div class="prose">
+        <div class="stats">
+          <div class="stat"><div class="num">300</div><div class="lbl">neurons</div></div>
+          <div class="stat"><div class="num">3,669</div><div class="lbl">chemical synapses</div></div>
+          <div class="stat"><div class="num">1,087</div><div class="lbl">gap junctions</div></div>
+          <div class="stat"><div class="num">256</div><div class="lbl">firing threshold</div></div>
+        </div>
+        <p>The wiring comes from Cook et al. 2019, the full map of both worm sexes. Each connection's strength is its synapse count times 10. Whether a connection excites or inhibits comes from receptor data (Fenyves et al. 2020).</p>
+        <p>Where the data can't decide, I use known biology: touch neurons block the opposite direction (Chalfie et al. 1985), command neurons on the same team help each other, and opposite teams block each other.</p>
+        <p>It's a simplified model. Most real worm neurons use smooth voltages rather than spikes, and the backward response here is about twice as strong as the forward one because AVA's wiring to its motors is that much denser. I left that as the data gives it instead of tuning the model to one test.</p>
+      </div>
+    </section>
+
+    <section class="story" id="chip">
+      <div>
+        <p class="kicker">From Python to chip</p>
+        <h2>Built to run on an FPGA</h2>
+      </div>
+      <div class="prose">
+        <p>The model only uses integer math and bit shifts, and every voltage stays between −512 and 255, so it maps straight onto hardware. The Python version is the reference: its output is saved as golden files, and the Verilog version has to match them bit for bit.</p>
+        <p>Next is a time-multiplexed core: one neuron circuit that loops over all 300 neurons, with the wiring stored in on-chip memory. The whole brain needs about 110,000 bits, which fits in a small FPGA.</p>
+        <ul class="road">
+          <li><span class="chip done">done</span>Python model with the real connectome</li>
+          <li><span class="chip done">done</span>Touch → decision → motors → wheels, both directions</li>
+          <li><span class="chip done">done</span>4-neuron network in Verilog, verified bit-exact</li>
+          <li><span class="chip next">next</span>Full 300-neuron core on an FPGA</li>
+          <li><span class="chip">later</span>The robot: real sensors and motors</li>
+        </ul>
+      </div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="credits">
+      <p>Wiring: Cook SJ et al., "Whole-animal connectomes of both <i>Caenorhabditis elegans</i> sexes," <i>Nature</i> 571, 63–71 (2019).</p>
+      <p>Signs: Fenyves BG et al., <i>PLOS Computational Biology</i> 16(12): e1007974 (2020), used under CC BY 4.0. Touch rule: Chalfie M et al., <i>Journal of Neuroscience</i> 5(4), 956–964 (1985). Data download via OpenWorm's ConnectomeToolbox.</p>
+    </div>
+    <div class="byline">
+      <span class="who">Built by Shivank Singh</span>
+      <a href="https://github.com/shivankusingh/bug-bot" target="_blank" rel="noopener">GitHub ↗</a>
+      <a href="https://www.linkedin.com/in/shivank-singh-44413531a/" target="_blank" rel="noopener">LinkedIn ↗</a>
+    </div>
+  </div>
+</footer>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+
+const $ = (id) => document.getElementById(id);
+const hero = $('hero'), canvas = $('brain'), notice = $('notice'), tooltip = $('tooltip');
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+const SCALE = 11;                 // layout units -> world units
+const COLORS = ['#c9d1ff', '#2de2e6', '#ff3ea5'].map((c) => new THREE.Color(c));   // other, backward, forward
+const MAX_SPARKS = 6000;
+
+async function main() {
+  let data;
+  try {
+    data = await (await fetch('run.json')).json();
+  } catch (err) {
+    notice.textContent = 'The brain data (run.json) could not be loaded.';
+    return;
+  }
+  let renderer;
+  try {
+    renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+  } catch (err) {
+    notice.textContent = 'Your browser can\'t show the 3D brain (WebGL is turned off).';
+    return;
+  }
+  notice.hidden = true;
+
+  const names = data.neurons.name, team = data.neurons.team, kind = data.neurons.kind;
+  const N = names.length;
+  const run = data.run, STEPS = run.fired.length;
+  const links = data.links, L = links.length;
+  const firedSets = run.fired.map((list) => new Set(list));
+
+  // ---------- scene ----------
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setClearColor(0x010104, 1);
+  const scene = new THREE.Scene();
+  const camera = new THREE.PerspectiveCamera(45, 1, 0.1, 300);
+  camera.position.set(0, 3, 32);
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.enablePan = false;
+  controls.minDistance = 12;
+  controls.maxDistance = 70;
+  controls.autoRotate = !reduceMotion;
+  controls.autoRotateSpeed = 0.5;
+  canvas.style.touchAction = 'pan-y';   // phones: vertical swipes still scroll the page, sideways drags rotate
+
+  // let the page scroll over the hero; zoom only with ctrl/cmd + wheel (pinch still zooms on touch)
+  hero.addEventListener('wheel', (e) => { if (!e.ctrlKey && !e.metaKey) e.stopPropagation(); }, { capture: true });
+
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  // only bright things glow: sparks and firing neurons, not the resting wires
+  const bloom = new UnrealBloomPass(new THREE.Vector2(256, 256), 0.8, 0.4, 0.32);
+  composer.addPass(bloom);
+  composer.addPass(new OutputPass());
+
+  // ---------- neurons ----------
+  const pos = new Float32Array(N * 3), col = new Float32Array(N * 3), size = new Float32Array(N), level = new Float32Array(N);
+  const baseSize = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const p = data.neurons.pos[i];
+    pos.set([p[0] * SCALE, p[1] * SCALE, p[2] * SCALE], i * 3);
+    const c = COLORS[team[i]];
+    col.set([c.r, c.g, c.b], i * 3);
+    baseSize[i] = kind[i] === 2 ? 2.1 : kind[i] === 1 ? 1.8 : kind[i] === 3 ? 1.35 : 1.0;
+    size[i] = baseSize[i];
+  }
+  const pointVert = `
+    attribute float size; attribute float level; attribute vec3 tint;
+    uniform float uScale; varying vec3 vTint; varying float vLevel;
+    void main() {
+      vTint = tint; vLevel = level;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = size * (1.0 + 1.1 * clamp(level, 0.0, 1.5)) * uScale / -mv.z;
+      gl_Position = projectionMatrix * mv;
+    }`;
+  const pointFrag = `
+    varying vec3 vTint; varying float vLevel;
+    void main() {
+      float d = length(gl_PointCoord - 0.5);
+      if (d > 0.5) discard;
+      float a = pow(smoothstep(0.5, 0.0, d), 2.0);
+      float bright = clamp(0.3 + 1.9 * vLevel, 0.05, 3.2);
+      gl_FragColor = vec4(vTint * bright * a, a);
+    }`;
+  const uScale = { value: 300 };
+  const pointMaterial = () => new THREE.ShaderMaterial({
+    uniforms: { uScale }, vertexShader: pointVert, fragmentShader: pointFrag,
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  });
+  const nodeGeo = new THREE.BufferGeometry();
+  nodeGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  nodeGeo.setAttribute('tint', new THREE.BufferAttribute(col, 3));
+  const sizeAttr = new THREE.BufferAttribute(size, 1).setUsage(THREE.DynamicDrawUsage);
+  const levelAttr = new THREE.BufferAttribute(level, 1).setUsage(THREE.DynamicDrawUsage);
+  nodeGeo.setAttribute('size', sizeAttr);
+  nodeGeo.setAttribute('level', levelAttr);
+  const nodes = new THREE.Points(nodeGeo, pointMaterial());
+  scene.add(nodes);
+
+  // ---------- wires ----------
+  const linePos = new Float32Array(L * 6), lineCol = new Float32Array(L * 6), lineBase = new Float32Array(L * 6);
+  const out = Array.from({ length: N }, () => []);
+  const BASE = 0.085;
+  for (let l = 0; l < L; l++) {
+    const [s, r] = links[l];
+    out[s].push(l);
+    linePos.set(pos.subarray(s * 3, s * 3 + 3), l * 6);
+    linePos.set(pos.subarray(r * 3, r * 3 + 3), l * 6 + 3);
+    const cs = COLORS[team[s]], cr = COLORS[team[r]];
+    lineBase.set([cs.r * BASE, cs.g * BASE, cs.b * BASE, cr.r * BASE, cr.g * BASE, cr.b * BASE], l * 6);
+  }
+  lineCol.set(lineBase);
+  const lineGeo = new THREE.BufferGeometry();
+  lineGeo.setAttribute('position', new THREE.BufferAttribute(linePos, 3));
+  const lineColAttr = new THREE.BufferAttribute(lineCol, 3).setUsage(THREE.DynamicDrawUsage);
+  lineGeo.setAttribute('color', lineColAttr);
+  const wires = new THREE.LineSegments(lineGeo, new THREE.LineBasicMaterial({
+    vertexColors: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+  }));
+  scene.add(wires);
+  const heat = new Float32Array(L);
+  let hot = new Set();
+
+  // ---------- sparks ----------
+  const sPos = new Float32Array(MAX_SPARKS * 3), sCol = new Float32Array(MAX_SPARKS * 3);
+  const sSize = new Float32Array(MAX_SPARKS), sLevel = new Float32Array(MAX_SPARKS);
+  const sparkGeo = new THREE.BufferGeometry();
+  const sPosAttr = new THREE.BufferAttribute(sPos, 3).setUsage(THREE.DynamicDrawUsage);
+  const sColAttr = new THREE.BufferAttribute(sCol, 3).setUsage(THREE.DynamicDrawUsage);
+  const sSizeAttr = new THREE.BufferAttribute(sSize, 1).setUsage(THREE.DynamicDrawUsage);
+  const sLevelAttr = new THREE.BufferAttribute(sLevel, 1).setUsage(THREE.DynamicDrawUsage);
+  sparkGeo.setAttribute('position', sPosAttr);
+  sparkGeo.setAttribute('tint', sColAttr);
+  sparkGeo.setAttribute('size', sSizeAttr);
+  sparkGeo.setAttribute('level', sLevelAttr);
+  sparkGeo.setDrawRange(0, 0);
+  const sparkPoints = new THREE.Points(sparkGeo, pointMaterial());
+  sparkPoints.frustumCulled = false;
+  scene.add(sparkPoints);
+  let sparks = [];   // { link, t0, dur }
+
+  // ---------- state ----------
+  const spike = new Float32Array(N);         // flash after firing, fades
+  const charge = new Float32Array(N);        // smoothed voltage level
+  const chargeTarget = new Float32Array(N);
+  const state = { step: 0, playing: true, speed: 1, start: 0, end: STEPS, loop: true, demo: true };
+  let acc = 0, clock = 0;
+  const stepDur = () => 0.42 / state.speed;
+
+  function clearEffects() {
+    sparks = [];
+    spike.fill(0);
+    for (const l of hot) { heat[l] = 0; lineCol.set(lineBase.subarray(l * 6, l * 6 + 6), l * 6); }
+    hot = new Set();
+    lineColAttr.needsUpdate = true;
+  }
+
+  function enterStep(s, withSparks) {
+    state.step = s;
+    const v = run.v[s];
+    for (let i = 0; i < N; i++) chargeTarget[i] = v[i] >= 0 ? v[i] / 256 : (v[i] / 512) * 0.55;
+    for (const i of run.fired[s]) {
+      spike[i] = 1;
+      if (!withSparks) continue;
+      for (const l of out[i]) {
+        if (sparks.length < MAX_SPARKS) sparks.push({ link: l, t0: clock, dur: stepDur() * 0.95 });
+        heat[l] = 1; hot.add(l);
+      }
+    }
+    const [head, tail] = run.pokes[s];
+    if (head) bump.front = 1;
+    if (tail) bump.rear = 1;
+    updateUi();
+  }
+
+  function advance() {
+    let next = state.step + 1;
+    if (next >= state.end) {
+      if (state.loop) { next = state.start; clearEffects(); }
+      else { state.playing = false; updateUi(); return; }
+    }
+    enterStep(next, true);
+  }
+
+  function startRange(a, b) {
+    state.demo = false; state.start = a; state.end = b; state.loop = false;
+    state.playing = true; acc = 0;
+    clearEffects();
+    enterStep(a, true);
+  }
+
+  // ---------- UI ----------
+  const phase = $('phase'), stepLabel = $('stepLabel'), scrub = $('scrub'), play = $('play');
+  scrub.max = STEPS - 1;
+  function updateUi() {
+    const s = state.step;
+    const [head, tail] = run.pokes[s];
+    const what = head ? 'poking the head' : tail ? 'poking the tail' : 'no touch';
+    phase.innerHTML = (state.demo ? 'Demo · ' : '') + '<strong>' + what + '</strong>';
+    stepLabel.textContent = `step ${s} / ${STEPS - 1}`;
+    scrub.value = s;
+    play.textContent = state.playing ? '❚❚' : '▶';
+    play.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
+    const [dir, spd] = run.wheels[s];
+    robot.target = dir === 'backward' ? -spd : dir === 'forward' ? spd : 0;
+    dirLabel.textContent = dir === 'backward' ? 'Backing up' : dir === 'forward' ? 'Driving forward' : 'Stopped';
+    dirLabel.style.color = dir === 'backward' ? 'var(--cyan)' : dir === 'forward' ? 'var(--magenta)' : 'var(--muted)';
+    speedLabel.textContent = `speed ${spd}`;
+  }
+  $('pokeHead').addEventListener('click', () => startRange(0, Math.min(40, STEPS)));
+  $('pokeTail').addEventListener('click', () => startRange(Math.min(40, STEPS - 1), STEPS));
+  play.addEventListener('click', () => {
+    state.demo = false;
+    if (state.playing) { state.playing = false; }
+    else {
+      if (state.step >= state.end - 1) { clearEffects(); enterStep(state.start, true); }
+      state.playing = true; acc = 0;
+    }
+    updateUi();
+  });
+  scrub.addEventListener('input', () => {
+    state.demo = false; state.playing = false; state.start = 0; state.end = STEPS; state.loop = false;
+    clearEffects();
+    enterStep(Number(scrub.value), false);
+  });
+  const speedInput = $('speed'), speedVal = $('speedVal');
+  speedInput.addEventListener('input', () => { state.speed = Number(speedInput.value); speedVal.textContent = `${state.speed}×`; });
+  canvas.addEventListener('pointerdown', () => { controls.autoRotate = false; });
+
+  // ---------- robot ----------
+  const dirLabel = $('dirLabel'), speedLabel = $('speedLabel');
+  const ground = $('ground'), wheelL = $('wheelL'), wheelR = $('wheelR');
+  const frontBump = $('frontBump'), rearBump = $('rearBump'), brainLed = $('brainLed');
+  const robot = { target: 0, vel: 0, roll: 0, dash: 0 };
+  const bump = { front: 0, rear: 0 };
+  const mixHex = (a, b, t) => '#' + new THREE.Color(a).lerp(new THREE.Color(b), Math.max(0, Math.min(1, t))).getHexString();
+  function drawRobot(dt) {
+    robot.vel += (robot.target - robot.vel) * Math.min(1, dt * 6);
+    robot.roll += robot.vel * dt * 9;
+    robot.dash -= robot.vel * dt * 1.6;
+    wheelL.setAttribute('transform', `rotate(${robot.roll} 72 84)`);
+    wheelR.setAttribute('transform', `rotate(${robot.roll} 148 84)`);
+    ground.setAttribute('stroke-dashoffset', robot.dash.toFixed(1));
+    bump.front *= Math.exp(-dt * 3); bump.rear *= Math.exp(-dt * 3);
+    frontBump.setAttribute('fill', mixHex('#1c2036', '#2de2e6', bump.front));
+    rearBump.setAttribute('fill', mixHex('#1c2036', '#ff3ea5', bump.rear));
+    const v = robot.vel / 40;
+    brainLed.setAttribute('fill', v < -0.05 ? mixHex('#c9d1ff', '#2de2e6', -v * 2) : v > 0.05 ? mixHex('#c9d1ff', '#ff3ea5', v * 2) : '#c9d1ff');
+  }
+
+  // ---------- hover ----------
+  const raycaster = new THREE.Raycaster();
+  raycaster.params.Points.threshold = 0.45;
+  const pointer = new THREE.Vector2();
+  let hovered = -1;
+  const PHARYNX = new Set(['I1L', 'I1R', 'I2L', 'I2R', 'I3', 'I4', 'I5', 'I6', 'M1', 'M2L', 'M2R', 'M3L', 'M3R',
+    'M4', 'M5', 'MCL', 'MCR', 'MI', 'NSML', 'NSMR']);
+  const roleOf = (i) => {
+    const t = team[i], k = kind[i];
+    if (PHARYNX.has(names[i])) return 'pharynx neuron';
+    if (names[i] === 'RIPL' || names[i] === 'RIPR') return 'pharynx link';
+    if (k === 1) return t === 1 ? 'head touch sensor' : 'tail touch sensor';
+    if (k === 2) return t === 1 ? 'backward command' : 'forward command';
+    if (k === 3) return t === 1 ? 'backward motor' : 'forward motor';
+    return 'brain neuron';
+  };
+  function setHover(i, x, y) {
+    if (hovered >= 0) size[hovered] = baseSize[hovered];
+    hovered = i;
+    if (i < 0) { tooltip.hidden = true; sizeAttr.needsUpdate = true; return; }
+    size[i] = baseSize[i] * 2.2;
+    sizeAttr.needsUpdate = true;
+    showTip(x, y);
+  }
+  function showTip(x, y) {
+    const i = hovered;
+    if (i < 0) return;
+    const v = run.v[state.step][i];
+    const fired = firedSets[state.step].has(i);
+    tooltip.innerHTML = `<div class="name">${names[i]}</div><div class="role">${roleOf(i)}</div>` +
+      `<div>v = ${v}${fired ? ' · <span style="color:var(--fg)">fired</span>' : ''}</div>`;
+    tooltip.hidden = false;
+    const r = hero.getBoundingClientRect();
+    const left = Math.min(x - r.left, r.width - 190), top = Math.min(y - r.top, r.height - 90);
+    tooltip.style.left = `${left}px`; tooltip.style.top = `${top}px`;
+  }
+  let lastPointer = null;
+  canvas.addEventListener('pointermove', (e) => { lastPointer = e; });
+  canvas.addEventListener('pointerleave', () => { lastPointer = null; setHover(-1); });
+  function pick() {
+    if (!lastPointer) return;
+    const r = canvas.getBoundingClientRect();
+    pointer.set(((lastPointer.clientX - r.left) / r.width) * 2 - 1, -((lastPointer.clientY - r.top) / r.height) * 2 + 1);
+    raycaster.setFromCamera(pointer, camera);
+    const hit = raycaster.intersectObject(nodes)[0];
+    const i = hit ? hit.index : -1;
+    if (i !== hovered) setHover(i, lastPointer.clientX, lastPointer.clientY);
+    else if (i >= 0) showTip(lastPointer.clientX, lastPointer.clientY);
+  }
+
+  // ---------- size ----------
+  // Fit the brain into the space above the controls: pick the camera distance so the brain's
+  // diameter fits that band (and the width), then aim slightly low so the brain sits higher.
+  const RADIUS = 13;
+  const bottomUi = document.querySelector('.bottom');
+  function resize() {
+    const w = hero.clientWidth, h = hero.clientHeight;
+    renderer.setSize(w, h, false);
+    composer.setSize(w, h);
+    camera.aspect = w / h;
+    const tan = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
+    const topGap = 48, band = Math.max(240, h - bottomUi.offsetHeight - topGap - 28);
+    const dist = Math.max(RADIUS / (tan * (band / h)), RADIUS / (tan * (w / h) * (w < 700 ? 0.92 : 0.62)));
+    const upPx = h / 2 - (topGap + band / 2);
+    const dir = camera.position.clone().sub(controls.target).normalize();
+    controls.target.set(0, -upPx * (2 * tan * dist / h), 0);
+    camera.position.copy(controls.target).addScaledVector(dir, dist);
+    controls.minDistance = dist * 0.35;
+    controls.maxDistance = dist * 1.8;
+    camera.updateProjectionMatrix();
+    uScale.value = (h / 0.828) * 0.3 * renderer.getPixelRatio();
+  }
+  const sizer = new ResizeObserver(resize);
+  sizer.observe(hero);
+  sizer.observe(bottomUi);
+  resize();
+
+  let visible = true;
+  new IntersectionObserver(([entry]) => { visible = entry.isIntersecting; }).observe(hero);
+
+  // ---------- loop ----------
+  const ease = (t) => t * t * (3 - 2 * t);
+  let last = performance.now() / 1000;
+  enterStep(0, true);
+  function frame(ms) {
+    const now = ms / 1000, dt = Math.min(0.05, now - last);
+    last = now;
+    if (visible && !document.hidden) {
+      clock += dt;
+      if (state.playing) {
+        acc += dt;
+        let guard = 0;
+        while (acc >= stepDur() && guard++ < 4) { acc -= stepDur(); advance(); }
+      }
+      const fade = Math.exp(-dt / (0.38 * stepDur()));
+      for (let i = 0; i < N; i++) {
+        spike[i] *= fade;
+        charge[i] += (chargeTarget[i] - charge[i]) * Math.min(1, dt * 5);
+        level[i] = Math.max(spike[i] * 1.4, 0) + 0.32 * charge[i];
+      }
+      levelAttr.needsUpdate = true;
+
+      const cool = Math.exp(-dt / (0.5 * stepDur()));
+      for (const l of hot) {
+        heat[l] *= cool;
+        const s = links[l][0], c = COLORS[team[s]], h = heat[l], amp = links[l][2] > 0 ? 0.55 : 0.3;
+        const o = l * 6;
+        lineCol[o] = lineBase[o] + c.r * h * amp; lineCol[o + 1] = lineBase[o + 1] + c.g * h * amp; lineCol[o + 2] = lineBase[o + 2] + c.b * h * amp;
+        lineCol[o + 3] = lineBase[o + 3] + c.r * h * amp * 0.45; lineCol[o + 4] = lineBase[o + 4] + c.g * h * amp * 0.45; lineCol[o + 5] = lineBase[o + 5] + c.b * h * amp * 0.45;
+        if (h < 0.004) { hot.delete(l); lineCol.set(lineBase.subarray(o, o + 6), o); }
+      }
+      lineColAttr.needsUpdate = true;
+
+      let n = 0;
+      const alive = [];
+      for (const sp of sparks) {
+        const t = (clock - sp.t0) / sp.dur;
+        if (t >= 1) continue;
+        alive.push(sp);
+        const [s, r, sign] = links[sp.link];
+        const k = ease(t);
+        sPos[n * 3] = pos[s * 3] + (pos[r * 3] - pos[s * 3]) * k;
+        sPos[n * 3 + 1] = pos[s * 3 + 1] + (pos[r * 3 + 1] - pos[s * 3 + 1]) * k;
+        sPos[n * 3 + 2] = pos[s * 3 + 2] + (pos[r * 3 + 2] - pos[s * 3 + 2]) * k;
+        const c = COLORS[team[s]];
+        sCol[n * 3] = c.r; sCol[n * 3 + 1] = c.g; sCol[n * 3 + 2] = c.b;
+        sSize[n] = sign > 0 ? 0.75 : 0.5;
+        sLevel[n] = (sign > 0 ? 0.9 : 0.45) * (1 - 0.4 * t);
+        n++;
+      }
+      sparks = alive;
+      sparkGeo.setDrawRange(0, n);
+      sPosAttr.needsUpdate = sColAttr.needsUpdate = sSizeAttr.needsUpdate = sLevelAttr.needsUpdate = true;
+
+      drawRobot(dt);
+      pick();
+      controls.update();
+      composer.render();
+    }
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+}
+main();
+</script>
+</body>
+</html>

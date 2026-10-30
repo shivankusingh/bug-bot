@@ -44,10 +44,10 @@ def save_golden(all_spikes, all_voltages, pokes, prefix="full", folder=DATA):
     paths["v"].write_text("".join(f"{v & 0xFFFF:04x}\n" for row in all_voltages for v in row))
 
     _check(paths, all_spikes, all_voltages, inputs)
-    print(f"Wrote {steps} steps x {n} neurons to {folder}:")
+    # print only the folder name, so notebook outputs don't carry a personal path
+    print(f"Wrote {steps} steps x {n} neurons to {folder.name}/:")
     for path in paths.values():
         print(f"  {path.name}: {len(path.read_text().splitlines())} lines")
-    return paths
 
 
 def _check(paths, all_spikes, all_voltages, inputs):
