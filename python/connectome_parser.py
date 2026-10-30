@@ -243,6 +243,12 @@ def write_module(path, neurons, connections, pipes):
     ]
     out += [f"    ({a}, {b}, {size})," for (a, b), size in pipes.items()]
     out += ["]", ""]
+    out += [
+        "# motor neurons by direction (indices), for the robot readout",
+        "back_motors = [" + ", ".join(n for n in BACKWARD_MOTOR if n in neurons) + "]",
+        "forward_motors = [" + ", ".join(n for n in FORWARD_MOTOR if n in neurons) + "]",
+        "",
+    ]
     path.write_text("\n".join(out))
 
 

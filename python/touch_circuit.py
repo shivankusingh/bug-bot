@@ -136,3 +136,7 @@ pipes = [
     (AVAR, PVCR, 22),
     (PVCL, PVCR, 67),
 ]
+
+# motor neurons by direction (indices), for the robot readout
+back_motors = []
+forward_motors = []

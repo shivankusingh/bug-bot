@@ -5472,3 +5472,7 @@ pipes = [
     (VC04, VC05, 4),
     (VC05, VC06, 4),
 ]
+
+# motor neurons by direction (indices), for the robot readout
+back_motors = [DA01, DA02, DA03, DA04, DA05, DA06, DA07, DA08, DA09, VA01, VA02, VA03, VA04, VA05, VA06, VA07, VA08, VA09, VA10, VA11, VA12]
+forward_motors = [DB01, DB02, DB03, DB04, DB05, DB06, DB07, VB01, VB02, VB03, VB04, VB05, VB06, VB07, VB08, VB09, VB10, VB11]

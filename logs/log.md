@@ -256,3 +256,62 @@ Picked the narrow one-way version. Backward motors still respond about 2x more t
 1. Motor readout: turn motor spikes into wheel direction + speed (normalize by group size).
 2. 16-bit safety inside `neuron_model`.
 3. Golden files for the full network, then the Verilog sim flow.
+
+
+# bug-bot log: Oct 29, 2026 (part 3): wheels
+
+## Summary
+Built the robot readout: motor spikes → wheel direction and speed. **Head touch → wheels go backward, tail touch → wheels go forward, never the wrong way, and the robot stops on its own.** The whole chain (sensor → brain → motors → wheels) now works in Python.
+
+## What I did
+- The parser now exports `back_motors` (21 DA/VA indices) and `forward_motors` (18 DB/VB indices) into the generated file.
+- Wrote the readout in `touch_test.ipynb` with two **muscle buckets**, one per direction. Each step, after the neurons update:
+  1. leak both: `muscle = muscle - (muscle >> MUSCLE_LEAK)`
+  2. add +1 for every motor in that group that fired
+  3. decide: both below `STOP_BELOW` → stop; otherwise the bigger bucket wins
+- My settings: `MUSCLE_LEAK = 2` (lose ¼ per step), `STOP_BELOW = 8`. Speed = the difference between the two buckets (like two opposing muscles: only the net pull moves the robot).
+- Added a wheels panel to the plot (`plot_run(..., wheels=wheels)`): backward bars below the line, forward above.
+
+## Result
+| | Head poke | Tail poke |
+|---|---|---|
+| Wheels | backward, steps 10–31, no gaps | forward, steps 49–66 (one-step pause at the start) |
+| Wrong direction | 0 steps | 0 steps |
+| Top speed | ~51 | ~20 |
+
+## Choosing the settings
+| Leak | Coasts after motors stop | Problem |
+|---|---|---|
+| `>> 1` | ~5 steps | drops to 3 in the gaps, jerky |
+| **`>> 2`** | **~11 steps** | middle ground |
+| `>> 3` | ~22 steps | slow to start and slow to stop |
+
+| Stop cutoff | Behavior |
+|---|---|
+| **8** | **smooth from the first burst, power of two (cheap check in hardware)** |
+| 10 | ignores the first small burst |
+| 16 | stops in the gaps again (jerky) |
+
+## What I learned
+- **Why a bucket:** motor neurons fire in bursts with gaps. Reading spikes directly makes the robot jerk. A leaky bucket works like a real muscle that stays tight for a moment.
+- **Spikes, not voltages:** I thought about using the motor neurons' voltage as the memory. It dips exactly when the motors fire (reset to 0), creeps up on the wrong side without any spikes, and coasts too long. Spikes are also 1 bit, the neuron's real output.
+- **+1 per motor:** the bucket counts how many motors fired (like counting people pushing a car). Weights are for neuron-to-neuron links, not for the readout.
+- **Leak first, then add**, same as the neuron. Adding first leaks away the new spikes on the same step (step 10 gave 7 instead of 9).
+- **Same leak for both buckets:** same rule, but each loses ¼ of its *own* value.
+- **Steady state:** with `>> 2` a bucket settles at about 4 × (motors firing per step), so it tracks activity.
+- **Integer shifts never reach 0:** `3 >> 2 = 0`, so the bucket gets stuck at 3. Stop has to be a cutoff, not "== 0". (Neurons do this too: 7 with `>> 3` stays 7.)
+- **Powers of two are cheap in hardware:** `x < 16` is just "are the upper bits all 0?"
+- `break` ends the whole simulation loop. "Stop" means the wheels stop, not the brain.
+
+## Mistakes I made (and fixed)
+- Left `back_motors = []` in the notebook, which replaced the imported lists with empty ones.
+- Added the neuron's index to the bucket instead of its spike.
+- Used one loop for both groups (21 vs 18 → would crash).
+- Added before leaking.
+- Used `break` for stop, which would have ended the run on step 0.
+- Decided before counting, so the wheels were one step late.
+
+## Next steps
+1. 16-bit safety inside `neuron_model`.
+2. Golden files for the full network.
+3. Verilog sim flow.
