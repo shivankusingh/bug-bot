@@ -349,3 +349,37 @@ Made the model 16-bit safe by adding a **voltage floor**: a neuron's voltage can
 1. Golden files for the full network.
 2. Demo website (my model exports runs, Claude builds the visualizer).
 3. Add the floor to `lif_neuron.v` during the Verilog step.
+
+
+# bug-bot log: Oct 29, 2026 (part 5): full-network golden files
+
+## Summary
+Saved my 300-neuron head + tail run as golden files: the answer key my future scalable Verilog core has to match bit for bit. **The Python reference model is done** (motors, readout, floor, golden files).
+
+## What I did
+- Claude wrote `python/golden.py` (tooling). My notebook calls `save_golden(all_spikes, all_voltages, pokes, prefix="full")` in its own cell, so the files only get rewritten when I choose.
+- Files in `data/`:
+
+| File | Lines | Each line |
+|---|---|---|
+| `full_inputs.txt` | 80 | `head*2 + tail` (same as `chain_inputs.txt`) |
+| `full_expected_spikes.txt` | 80 | 300-bit hex number, **bit i = neuron i** |
+| `full_expected_v.txt` | 24,000 | one 16-bit voltage (`%04x`), line = `step * 300 + neuron` |
+
+- The exporter reads the files back the way a testbench would and checks every spike and voltage. My files also matched Claude's independent run byte for byte.
+
+## Decisions
+- **Bit i = neuron i** for spikes (not "first neuron = top bit" like my chain file), because the scalable core will look up `spikes[i]`.
+- **One voltage per line, 16 bits:** easy to read and debug. The golden files live on the computer only (~120 KB), not on the chip.
+
+## What I learned
+- Golden files are for the testbench in simulation. They never go onto the FPGA, so their size doesn't matter much.
+- What goes **on** the chip: the network (~3,744 connections, 1,087 pipes), 300 voltages, and spike flags, about 110,000 bits total. That fits easily in small FPGAs (iCE40 UP5K, Artix-7).
+- Thanks to the floor, a stored voltage is always −512 to 255, so it fits in **10 bits** instead of 16 (37% smaller). The math during an update still needs more bits. That's a hardware decision for later.
+- `& 0xFFFF` turns a negative number into 16-bit two's complement: −512 → `fe00`.
+- Restarting the kernel wipes all variables: run the simulation cell before the golden-file cell (or Run All).
+
+## Next steps
+1. Demo website: my model exports runs, Claude builds the visualizer. Preview privately, then GitHub Pages + a GIF in the README.
+2. Senses: nose touch first.
+3. Verilog: scalable core, matched against the 4-neuron and full-network golden files.
