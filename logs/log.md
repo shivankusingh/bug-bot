@@ -315,3 +315,37 @@ Built the robot readout: motor spikes → wheel direction and speed. **Head touc
 1. 16-bit safety inside `neuron_model`.
 2. Golden files for the full network.
 3. Verilog sim flow.
+
+
+# bug-bot log: Oct 29, 2026 (part 4): voltage floor
+
+## Summary
+Made the model 16-bit safe by adding a **voltage floor**: a neuron's voltage can never go below −512.
+
+## Why
+- The FPGA stores voltages in 16 bits (−32,768 to 32,767). Python has no limit, so it can't warn about overflow.
+- The strongest possible brake in one step is RIAL at −4,270. Held there, a neuron would settle near 8 × −4,270 = −34,160, past the 16-bit limit. On the chip that wraps around to a big positive number and fires for no reason.
+- Options: wrap (what raw hardware does, a bug), clamp at −32,768, or a floor. Picked a floor because real neurons have one too: inhibition pulls toward a fixed level, never past it. It's also cheap in hardware, and it stops brakes from lasting forever.
+
+## What I did
+- Added `FLOOR = -512` and an `elif v < FLOOR: v = FLOOR` in `neuron_model`, in **both** notebooks (`bug_bot.ipynb` is the 4-neuron test bench, `touch_test.ipynb` the real brain).
+- Picked −512: a power of two, and below the −400 in my 4-neuron test, so the golden files don't change.
+
+## Results
+| Check | Result |
+|---|---|
+| 4-neuron golden files (all 6) | identical ✅ (lowest voltage −400) |
+| Touch test lowest voltage | −512 (was −2,003) |
+| Wheels | still backward on head (steps 10–34), forward on tail (50–66), 0 wrong way |
+| Floors from −64 to −2,048 | almost no change in behavior |
+
+## What I learned
+- The top is already capped by firing (≥ 256 → reset to 0), so a floor at the bottom bounds the voltage completely: −512 to 255.
+- `elif` is enough: a voltage can't be ≥ 256 and below −512 at the same time, so order doesn't matter.
+- `bug_bot.ipynb` is my test bench: small known answers to check Verilog against. My current Verilog is hand-wired (one `lif_neuron` per neuron); the scalable core will first have to match these same 4-neuron golden files.
+- `neuron_model` lives in two places, so every math change has to go into both.
+
+## Next steps
+1. Golden files for the full network.
+2. Demo website (my model exports runs, Claude builds the visualizer).
+3. Add the floor to `lif_neuron.v` during the Verilog step.

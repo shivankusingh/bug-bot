@@ -42,7 +42,7 @@ Running the C. elegans connectome (302 neurons) as a spiking neural network on a
 - Pipes (with spike packages) are in Python only, not in Verilog yet.
 
 ## Model conventions (Python and Verilog must match exactly)
-- Integer-only LIF: `v = v - (v >> 3) + total`; spike if `v >= 256`, then reset `v = 0`.
+- Integer-only LIF: `v = v - (v >> 3) + total`; spike if `v >= 256`, then reset `v = 0`; otherwise if `v < FLOOR` (−512), set `v = FLOOR`. Voltage stays between −512 and 255 after every step.
 - `total` (this step's input, reset to 0 each step) is kept separate from `v` (neuron memory). The leak uses the old `v` before input is added.
 - Neuron-to-neuron spikes arrive with a **one-step delay** (from `last_spikes`). Pokes (external inputs) act on the **same step**.
 - Sparse format: `connections[sender] = [(receiver, weight), ...]`; `poke_connections[poke] = [(receiver, weight), ...]`.
@@ -60,8 +60,8 @@ Running the C. elegans connectome (302 neurons) as a spiking neural network on a
 Any change to the Python model must reproduce the existing golden files exactly unless the math is changed on purpose. If the math changes, change Python first, then Verilog, then regenerate golden files.
 
 ## Known issues
-- Python ints don't overflow; wrap/saturation should be modeled inside `neuron_model`, not only masked at export.
-- Verilog: 16-bit `total`/`voltage` with no saturation; no voltage floor.
+- `neuron_model` is copied in two notebooks (`bug_bot.ipynb`, `touch_test.ipynb`); any math change must go into both. Possible later cleanup: one shared `neuron.py`.
+- Verilog: 16-bit `total`/`voltage` with no saturation, and **no voltage floor yet**. `lif_neuron.v` needs the floor (−512) to match Python again (doesn't affect the current 4-neuron golden files, whose lowest voltage is −400).
 - One module instance per neuron won't scale to 302.
 - Most real C. elegans neurons use graded potentials, not spikes. LIF is a deliberate simplification. Because a firing neuron resets to 0, pipes can't pass activity well; spike packages and circuit pipe links are workarounds.
 - Only one behavior test so far (head + tail touch). Risk of tuning to that one test (overfitting): add more tests before tuning further.
@@ -71,7 +71,7 @@ Any change to the Python model must reproduce the existing golden files exactly 
 1. ✅ Python model refactored to sparse connection lists.
 2. ✅ Load the real connectome (Cook et al. 2019 + Fenyves et al. 2020). Parser outputs the `connections` and `pipes` format.
 3. ✅ Sanity check: head touch → backward, tail touch → forward, in Python.
-4. **Next:** finish Python: ✅ motor readout; next 16-bit safety in `neuron_model`, then golden files for the full network. Then local sim flow: Icarus/Verilator + cocotb (Python testbenches comparing against the model) + Surfer/GTKWave.
+4. **Next:** finish Python: ✅ motor readout; ✅ voltage floor (16-bit safe); next golden files for the full network (and the demo website). Then local sim flow: Icarus/Verilator + cocotb (Python testbenches comparing against the model) + Surfer/GTKWave.
 5. Hardware: time-multiplexed core: one neuron-update unit looping over all neurons, voltages in BRAM, synapses in CSR format, two-phase timestep (deliver spikes, then update neurons), double-buffered spike flags. First test: load the 4-neuron network from memory files and match its output.
 6. FPGA board + robot I/O (sensors → sensory neurons, motor neurons → motors), then RL.
 7. Later: scale to the fruit fly connectome.
