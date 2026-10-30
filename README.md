@@ -17,7 +17,7 @@ implemented as a spiking neural network on an FPGA and driving a small robot.
 - [x] Single LIF neuron in Python and Verilog, outputs match exactly
 - [x] 3-input neuron with an inhibitory input (signed arithmetic in Verilog), verified bit-exact
 - [x] 4-neuron network in Python: excitatory chain A → B → C plus an inhibitory interneuron
-- [ ] 4-neuron network in Verilog
+- [X] 4-neuron network in Verilog
 - [ ] Run on real FPGA hardware (Vivado)
 - [x] Load real C. elegans wiring (touch-withdrawal circuit first)
 - [ ] Full 302-neuron brain in hardware
