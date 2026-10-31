@@ -6,7 +6,9 @@ module core #(
     parameter MEM_DIR = "../data/mem/chain" // folder with the .mem files
 )(
     input clk,
-    input reset
+    input reset,
+    input start_step,
+    output reg busy
 );
 
     // wiring (loaded once from MEM_DIR, never changes)
@@ -39,4 +41,39 @@ module core #(
         end
     end
 
+    reg [8:0] neuron_index; 
+    wire signed [15:0] new_voltage;
+    wire new_spike;
+
+    lif_math neuron_math(
+        .old_voltage(voltages[neuron_index]),
+        .total(totals[neuron_index]),
+        .new_voltage(new_voltage),
+        .spike(new_spike)
+    );
+    
+    always @(posedge clk) begin
+        if (reset) begin
+            neuron_index <= 0;
+            busy <= 0;
+        end
+        else if (!busy) begin
+            if(start_step) begin
+                busy <= 1;
+                neuron_index <= 0;
+            end
+        end
+        else if (busy) begin
+
+            if (neuron_index == N) begin
+                busy <=0;
+            end
+            else begin
+                voltages[neuron_index] <= new_voltage;
+                spikes[neuron_index] <= new_spike;
+                neuron_index <= neuron_index + 1;
+            end
+
+        end
+    end
 endmodule
