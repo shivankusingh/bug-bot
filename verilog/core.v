@@ -26,6 +26,13 @@ module core #(
 
     integer i;
 
+    // states
+    localparam IDLE = 0,
+               CLEAR = 1,
+               UPDATE = 2;
+    reg [2:0] state;
+   
+
     initial begin
         $readmemh({MEM_DIR, "/link_receiver.mem"}, link_receiver);
         $readmemh({MEM_DIR, "/link_weight.mem"},   link_weight);
@@ -33,7 +40,6 @@ module core #(
         $readmemh({MEM_DIR, "/poke_receiver.mem"}, poke_receiver);
         $readmemh({MEM_DIR, "/poke_weight.mem"},   poke_weight);
         $readmemh({MEM_DIR, "/poke_start.mem"},    poke_start);
-
         for (i = 0; i < N; i = i + 1) begin
             voltages[i] = 0;
             totals[i]   = 0;
@@ -53,27 +59,40 @@ module core #(
     );
     
     always @(posedge clk) begin
+        
         if (reset) begin
             neuron_index <= 0;
             busy <= 0;
+            state <= IDLE;
         end
-        else if (!busy) begin
-            if(start_step) begin
-                busy <= 1;
-                neuron_index <= 0;
+        else if (state == IDLE) begin
+            if (start_step) begin
+                state <= CLEAR;
+                busy<=1;
             end
         end
-        else if (busy) begin
-
+        else if (state == CLEAR) begin
             if (neuron_index == N) begin
-                busy <=0;
+                state <= UPDATE;
+                neuron_index <= 0;
+            end
+            else begin
+                neuron_index <= neuron_index + 1;
+                totals[neuron_index] <= 0;
+            end
+        end
+        else if (state == UPDATE) begin
+            if (neuron_index == N) begin
+                state <= IDLE;
+                busy <= 0;
+                neuron_index <= 0;
             end
             else begin
                 voltages[neuron_index] <= new_voltage;
                 spikes[neuron_index] <= new_spike;
                 neuron_index <= neuron_index + 1;
             end
-
         end
+        
     end
 endmodule
