@@ -50,7 +50,8 @@ def read(memory, slot):
 @cocotb.test()
 async def clear_then_update(dut):
     network = cocotb.plusargs["network"]
-    n = len(NETWORKS[network]()[0])
+    connections = NETWORKS[network]()[0]
+    n, n_links = len(connections), sum(len(out) for out in connections)
     rng = random.Random(11)
     cocotb.start_soon(Clock(dut.clk, 10, unit="ns").start())
 
@@ -80,7 +81,7 @@ async def clear_then_update(dut):
         while int(dut.busy.value) == 1:
             await FallingEdge(dut.clk)
             ticks += 1
-            assert ticks <= 2 * n + 20, f"step {step}: busy still 1 after {ticks} ticks ({n} neurons)"
+            assert ticks <= 4 * n + 2 * n_links + 50, f"step {step}: busy still 1 after {ticks} ticks ({n} neurons)"
         assert ticks > 0, f"step {step}: busy never went to 1 after start_step"
 
         for i in range(n):

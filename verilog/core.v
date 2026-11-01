@@ -26,13 +26,15 @@ module core #(
     reg               spikes   [0:N-1];
 
     reg [7:0] slot;
+    reg [15:0] slot_spikes;
     integer i;
 
     // states
     localparam IDLE = 0,
                CLEAR = 1,
                POKES = 2,
-               UPDATE = 3;
+               SPIKES = 3,
+               UPDATE = 4;
                
     reg [2:0] state;
     
@@ -82,6 +84,7 @@ module core #(
                 neuron_index <= 0;
                 poke_index <= 0;
                 slot <= 0;
+                slot_spikes <= 0;
             end
             else begin
                 neuron_index <= neuron_index + 1;
@@ -90,9 +93,10 @@ module core #(
         end
         else if (state == POKES) begin
             if(poke_index == N_POKES) begin
-                state <= UPDATE;
+                state <= SPIKES;
                 poke_index <= 0;
                 slot <= 0;
+                neuron_index <= 0;
             end
             else if (slot == poke_start[poke_index+1]) begin
                 poke_index <= poke_index + 1;
@@ -108,6 +112,29 @@ module core #(
             
         
 
+
+        end
+
+        else if (state == SPIKES) begin
+
+                if (neuron_index == N) begin
+                    state <= UPDATE;
+                    neuron_index <= 0;
+                    slot_spikes <= 0;
+                end
+                else if (slot_spikes == start[neuron_index+1])begin
+                    neuron_index <= neuron_index + 1;
+                end
+                else begin
+                    if (spikes[neuron_index] == 1) begin
+                        totals[link_receiver[slot_spikes]] <= totals[link_receiver[slot_spikes]] + link_weight[slot_spikes];
+                        slot_spikes <= slot_spikes + 1;
+                    end
+                    else begin 
+                        neuron_index <= neuron_index + 1;
+                        slot_spikes <= slot_spikes + (start[neuron_index+1] - slot_spikes);
+                    end
+                end
 
         end
         else if (state == UPDATE) begin

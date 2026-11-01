@@ -9,8 +9,8 @@ For each network (4-neuron, then 300-neuron) it runs 12 steps with every poke pa
 pulses start_step and waits for busy to go back to 0, then checks:
     1. totals: every neuron got exactly its poke mail (and nothing else)
     2. voltages and spikes: match the Python neuron_model, voltages carrying over
-Neuron-to-neuron spikes are NOT delivered yet (phase 1c), so the Python side here only
-uses the pokes.
+Before each step it sets every spikes[i] to 0, so even once the core has a SPIKES job
+there is no neuron-to-neuron mail and this test checks the pokes alone.
 
 What core.v needs, on top of test_core_clear.py:
     input [N_POKES-1:0] pokes    bit p = poke p (pokes[0] = head, pokes[1] = tail)
@@ -73,13 +73,15 @@ async def pokes_reach_totals(dut):
     voltages = [0] * n
     for step, row in enumerate(patterns):
         dut.pokes.value = sum(bit << p for p, bit in enumerate(row))  # bit p = poke p
+        for i in range(n):                # wipe last step's spikes, so a SPIKES job (once
+            dut.spikes[i].value = 0       # it exists) has nothing to deliver: pokes only
         await FallingEdge(dut.clk)
         dut.start_step.value = 1          # "do a step", for one tick
         await FallingEdge(dut.clk)
         dut.start_step.value = 0
 
         ticks = 0
-        limit = 2 * n + 2 * len(sum(poke_connections, [])) + 2 * n_pokes + 10
+        limit = 4 * n + 2 * sum(len(out) for out in connections) + 2 * len(sum(poke_connections, [])) + 50
         while int(dut.busy.value) == 1:
             await FallingEdge(dut.clk)
             ticks += 1
