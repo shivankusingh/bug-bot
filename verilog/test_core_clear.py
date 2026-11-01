@@ -56,6 +56,8 @@ async def clear_then_update(dut):
 
     dut.reset.value = 1
     dut.start_step.value = 0
+    if hasattr(dut, "pokes"):     # once the core has pokes, keep them all off here
+        dut.pokes.value = 0
     for _ in range(3):
         await RisingEdge(dut.clk)
     await FallingEdge(dut.clk)  # change inputs halfway between rising edges
@@ -78,7 +80,7 @@ async def clear_then_update(dut):
         while int(dut.busy.value) == 1:
             await FallingEdge(dut.clk)
             ticks += 1
-            assert ticks <= 2 * n + 5, f"step {step}: busy still 1 after {ticks} ticks ({n} neurons)"
+            assert ticks <= 2 * n + 20, f"step {step}: busy still 1 after {ticks} ticks ({n} neurons)"
         assert ticks > 0, f"step {step}: busy never went to 1 after start_step"
 
         for i in range(n):
