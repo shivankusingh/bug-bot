@@ -22,9 +22,10 @@ from cocotb.triggers import FallingEdge, RisingEdge
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "python"))
-from make_mem import chain_network, full_network  # noqa: E402
+from make_mem import chain_network, chain_pipes, full_network, full_pipes  # noqa: E402
 
 NETWORKS = {"chain": chain_network, "full": full_network}
+PIPE_LISTS = {"chain": chain_pipes, "full": full_pipes}
 FLOOR, THRESHOLD = -512, 256
 
 
@@ -64,6 +65,9 @@ async def clear_then_update(dut):
     await FallingEdge(dut.clk)  # change inputs halfway between rising edges
     assert int(dut.busy.value) == 0, "busy should be 0 during reset"
     dut.reset.value = 0
+    if hasattr(dut, "pipe_size"):           # turn every pipe off (size 0): this test leaves pipes out
+        for k in range(len(dut.pipe_size)):
+            dut.pipe_size[k].value = 0
 
     for step in range(3):
         # junk the core should ignore (totals) or carry on from (voltages)
@@ -108,6 +112,7 @@ if __name__ == "__main__":
             "N_LINKS": sum(len(out) for out in connections),
             "N_POKES": len(poke_connections),
             "N_POKE_LINKS": sum(len(out) for out in poke_connections),
+            "N_PIPES": max(1, len(PIPE_LISTS[network]())),
             "MEM_DIR": f'"../data/mem/{network}"',  # relative to verilog/, where the test runs
         }
         runner.build(sources=[HERE / "core.v", HERE / "lif_math.v"], hdl_toplevel="core",

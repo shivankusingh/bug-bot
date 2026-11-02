@@ -17,12 +17,19 @@ list where neuron i's links are slots START[i] .. START[i+1]-1):
     poke_receiver.mem   same three lists for the pokes
     poke_weight.mem
     poke_start.mem
+and the pipes as a plain flat list (no CSR: every pipe is used every step), one line per pipe:
+    pipe_a.mem          one end of the pipe (neuron number)
+    pipe_b.mem          the other end
+    pipe_size.mem       raw size, 1 to 250 (unsigned)
+A network with no pipes (the chain) gets one do-nothing pipe, A-B with size 0, because a
+Verilog memory can't have 0 slots. Size 0 means no flow and no spike package.
 All numbers are hex, one per line, line k = slot k.
 """
 from pathlib import Path
 
 MEM = Path(__file__).resolve().parent.parent / "data" / "mem"
 WEIGHT_BITS = 11  # must match the width of link_weight and poke_weight in verilog/core.v
+PIPE_SIZE_BITS = 8  # must match the width of pipe_size in verilog/core.v
 
 
 def to_csr(lists):
@@ -46,7 +53,7 @@ def _write(path, numbers, width=None):
     path.write_text("".join(line + "\n" for line in lines))
 
 
-def write_mem(connections, poke_connections, folder):
+def write_mem(connections, poke_connections, folder, pipes=()):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     for prefix, lists in (("link", connections), ("poke", poke_connections)):
@@ -60,6 +67,14 @@ def write_mem(connections, poke_connections, folder):
         _write(folder / ("start.mem" if prefix == "link" else "poke_start.mem"), start)
         print(f"  {prefix}s: {len(receivers)} slots, weights {min(weights)} to {max(weights)}, "
               f"start has {len(start)} slots (biggest {start[-1]})")
+    pipes = list(pipes) or [(0, 1, 0)]          # the do-nothing pipe, see the top of this file
+    for a, b, size in pipes:
+        if not 0 <= size < (1 << PIPE_SIZE_BITS):
+            raise ValueError(f"pipe {a}-{b}: size {size} doesn't fit in {PIPE_SIZE_BITS} unsigned bits")
+    _write(folder / "pipe_a.mem", [a for a, _, _ in pipes])
+    _write(folder / "pipe_b.mem", [b for _, b, _ in pipes])
+    _write(folder / "pipe_size.mem", [size for _, _, size in pipes])
+    print(f"  pipes: {len(pipes)} slots, sizes {min(s for *_, s in pipes)} to {max(s for *_, s in pipes)}")
     # print only the folder name, so nothing personal ends up in notebook outputs
     print(f"Wrote {folder.parent.name}/{folder.name}/ for {len(connections)} neurons")
 
@@ -82,6 +97,16 @@ def full_network():
     return net.connections, poke_connections
 
 
+def chain_pipes():
+    return []                                   # the 4-neuron network has no pipes
+
+
+def full_pipes():
+    """[(a, b, size), ...] for the 300-neuron worm, each pair once, raw size."""
+    import connectome_all as net
+    return net.pipes
+
+
 if __name__ == "__main__":
-    write_mem(*chain_network(), MEM / "chain")
-    write_mem(*full_network(), MEM / "full")
+    write_mem(*chain_network(), MEM / "chain", chain_pipes())
+    write_mem(*full_network(), MEM / "full", full_pipes())

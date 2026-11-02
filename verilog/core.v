@@ -3,7 +3,9 @@ module core #(
     parameter N_LINKS = 3,                  // chemical links (all senders glued together)
     parameter N_POKES = 2,                  // pokes (head, tail)
     parameter N_POKE_LINKS = 2,             // poke links (all pokes glued together)
+    parameter N_PIPES = 1,                  // pipes (all pipes glued together)
     parameter MEM_DIR = "../data/mem/chain" // folder with the .mem files
+    
 )(
     input clk,
     input reset,
@@ -19,7 +21,9 @@ module core #(
     reg [8:0]         poke_receiver [0:N_POKE_LINKS-1];
     reg signed [10:0] poke_weight   [0:N_POKE_LINKS-1];
     reg [11:0]        poke_start    [0:N_POKES];
-
+    reg [8:0]         pipe_a        [0:N_PIPES-1];
+    reg [8:0]         pipe_b        [0:N_PIPES-1];
+    reg [7:0] pipe_size     [0:N_PIPES-1];
     // brain state (one slot per neuron, changes every step)
     reg signed [15:0] voltages [0:N-1];
     reg signed [15:0] totals   [0:N-1];
@@ -34,12 +38,19 @@ module core #(
                CLEAR = 1,
                POKES = 2,
                SPIKES = 3,
-               UPDATE = 4;
+               PIPES = 4,
+               UPDATE = 5;
                
     reg [2:0] state;
     
     reg [7:0] poke_index;
+    reg [2:0] PIPE_K;
 
+    reg [3:0] pipe_shift;
+    wire signed [19:0] pipe_flow;
+
+    wire signed [15:0] totals_temp_val_holder_a;
+    wire signed [15:0] totals_temp_val_holder_b;
     initial begin
         $readmemh({MEM_DIR, "/link_receiver.mem"}, link_receiver);
         $readmemh({MEM_DIR, "/link_weight.mem"},   link_weight);
@@ -47,6 +58,9 @@ module core #(
         $readmemh({MEM_DIR, "/poke_receiver.mem"}, poke_receiver);
         $readmemh({MEM_DIR, "/poke_weight.mem"},   poke_weight);
         $readmemh({MEM_DIR, "/poke_start.mem"},    poke_start);
+        $readmemh({MEM_DIR, "/pipe_a.mem"},          pipe_a);
+        $readmemh({MEM_DIR, "/pipe_b.mem"},          pipe_b);
+        $readmemh({MEM_DIR, "/pipe_size.mem"},       pipe_size);
         for (i = 0; i < N; i = i + 1) begin
             voltages[i] = 0;
             totals[i]   = 0;
@@ -54,7 +68,7 @@ module core #(
         end
     end
 
-    reg [8:0] neuron_index; 
+    reg [10:0] neuron_index; 
     wire signed [15:0] new_voltage;
     wire new_spike;
 
@@ -64,7 +78,12 @@ module core #(
         .new_voltage(new_voltage),
         .spike(new_spike)
     );
-    
+        
+        assign totals_temp_val_holder_b = (spikes[pipe_a[neuron_index]] ==1) ?  ( pipe_size[neuron_index] * PIPE_K) :  0;
+       
+        assign totals_temp_val_holder_a = (spikes[pipe_b[neuron_index]] ==1) ?  ( pipe_size[neuron_index] * PIPE_K) : 0;
+        assign pipe_flow  =(((voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]) * $signed({1'b0,pipe_size[neuron_index]})) >>> pipe_shift);
+
     always @(posedge clk) begin
         
         if (reset) begin
@@ -118,9 +137,12 @@ module core #(
         else if (state == SPIKES) begin
 
                 if (neuron_index == N) begin
-                    state <= UPDATE;
+                    state <= PIPES;
                     neuron_index <= 0;
                     slot_spikes <= 0;
+                    PIPE_K <= 1;
+                    pipe_shift <= 10;
+              
                 end
                 else if (slot_spikes == start[neuron_index+1])begin
                     neuron_index <= neuron_index + 1;
@@ -137,6 +159,30 @@ module core #(
                 end
 
         end
+
+
+        else if (state == PIPES) begin
+            if (neuron_index == N_PIPES) begin
+                state <= UPDATE;
+                neuron_index <= 0;
+
+            end
+            
+            else begin
+
+
+            totals[pipe_a[neuron_index]] <= totals[pipe_a[neuron_index]] - pipe_flow + totals_temp_val_holder_a;
+            totals[pipe_b[neuron_index]] <= totals[pipe_b[neuron_index]] + pipe_flow + totals_temp_val_holder_b;
+
+            neuron_index <= neuron_index + 1;
+            
+            end
+            
+
+            
+        end
+
+
         else if (state == UPDATE) begin
             if (neuron_index == N) begin
                 state <= IDLE;

@@ -9,10 +9,11 @@ It builds core.v twice, once per network, and after loading checks every slot:
     full    the 300-neuron worm         (data/mem/full)
 
 What core.v needs (names must match):
-    parameters  N, N_LINKS, N_POKES, N_POKE_LINKS, MEM_DIR (a string, the folder to load from)
+    parameters  N, N_LINKS, N_POKES, N_POKE_LINKS, N_PIPES, MEM_DIR (a string, the folder to load from)
     ports       clk, reset
-    memories    link_receiver, link_weight, start, poke_receiver, poke_weight, poke_start
-                (loaded from MEM_DIR), and voltages, totals, spikes (N slots each, all 0 at start)
+    memories    link_receiver, link_weight, start, poke_receiver, poke_weight, poke_start,
+                pipe_a, pipe_b, pipe_size (loaded from MEM_DIR), and voltages, totals, spikes
+                (N slots each, all 0 at start)
 """
 import sys
 from pathlib import Path
@@ -22,9 +23,10 @@ from cocotb.triggers import Timer
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent / "python"))
-from make_mem import chain_network, full_network, to_csr  # noqa: E402
+from make_mem import chain_network, chain_pipes, full_network, full_pipes, to_csr  # noqa: E402
 
 NETWORKS = {"chain": chain_network, "full": full_network}
+PIPE_LISTS = {"chain": chain_pipes, "full": full_pipes}
 
 
 def read(memory, slot, signed=False):
@@ -65,6 +67,10 @@ async def memories_load(dut):
     check(dut, "poke_receiver", receivers)
     check(dut, "poke_weight", weights, signed=True)
     check(dut, "poke_start", start)
+    pipes = PIPE_LISTS[network]() or [(0, 1, 0)]   # the chain's do-nothing pipe, see make_mem.py
+    check(dut, "pipe_a", [a for a, _, _ in pipes])
+    check(dut, "pipe_b", [b for _, b, _ in pipes])
+    check(dut, "pipe_size", [size for _, _, size in pipes])
     for name in ("voltages", "totals", "spikes"):
         check(dut, name, [0] * n, signed=True)
     dut._log.info(f"PASS: every memory loaded correctly for the {network} network ({n} neurons)")
@@ -81,6 +87,7 @@ if __name__ == "__main__":
             "N_LINKS": sum(len(out) for out in connections),
             "N_POKES": len(poke_connections),
             "N_POKE_LINKS": sum(len(out) for out in poke_connections),
+            "N_PIPES": max(1, len(PIPE_LISTS[network]())),
             "MEM_DIR": f'"../data/mem/{network}"',  # relative to verilog/, where the test runs
         }
         runner.build(sources=[HERE / "core.v", HERE / "lif_math.v"], hdl_toplevel="core",
