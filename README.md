@@ -3,8 +3,9 @@
 Putting a real animal's brain on a chip: the *C. elegans* worm's 302-neuron connectome,
 implemented as a spiking neural network on an FPGA and driving a small robot.
 
-**Status:** the Python reference model is complete: the real worm brain (300 neurons) reacts
-correctly to touch, all the way to the wheels. Next: the scalable Verilog core.
+**Status:** the scalable Verilog core runs the whole worm brain (300 neurons, 3,669 chemical
+synapses, 1,087 gap junctions) in simulation and matches the Python reference model bit for bit, every
+voltage and every spike. Next: the robot readout in Verilog, then real FPGA hardware.
 
 **Live demo:** [shivankusingh.github.io/bug-bot](https://shivankusingh.github.io/bug-bot/): a 3D view of the
 worm's 300 neurons. Poke the head or tail and watch the brain decide which way the robot moves.
@@ -21,8 +22,15 @@ worm's 300 neurons. Poke the head or tail and watch the brain decide which way t
   the same team (backward or forward) help each other while opposite teams block each other.
 - **Robot readout:** backward (DA/VA) and forward (DB/VB) motor spikes fill two leaky "muscle"
   buckets; the fuller one sets the wheel direction and speed.
+- **Hardware design:** one neuron circuit is reused for every neuron (time-multiplexing): a counter
+  walks through memory, and the circuit updates one neuron per clock tick. The wiring lives in memory
+  in a compact list format (CSR), so the same design scales from 4 neurons to the whole worm by
+  loading different memory files. Each step runs five jobs in order: clear inputs, deliver touches,
+  deliver last step's spikes (skipping neurons that didn't fire), gap junctions, update neurons. A
+  worm step takes about 2,100 clock ticks, around 21 µs at 100 MHz.
 - **Verification:** every design is built first as a **Python reference model**, then in **Verilog**,
-  and checked bit-for-bit against golden files with a self-checking testbench.
+  and checked bit-for-bit against golden files with [cocotb](https://www.cocotb.org/) testbenches
+  (Icarus Verilog), one test per job plus a full replay of the 80-step touch run.
 
 ## Progress
 - [x] Single LIF neuron in Python and Verilog, outputs match exactly
@@ -34,8 +42,10 @@ worm's 300 neurons. Poke the head or tail and watch the brain decide which way t
 - [x] Motor neurons and robot wheel readout in Python, both directions
 - [x] 16-bit safe model (voltage floor) and golden files for the full network
 - [x] Live 3D demo website
-- [ ] Scalable Verilog core (one neuron circuit looping over all neurons, wiring in memory)
-- [ ] Full brain on real FPGA hardware
+- [x] Scalable Verilog core (one neuron circuit looping over all neurons, wiring in memory):
+      the full 300-neuron brain matches the Python model bit-exact in simulation
+- [ ] Robot readout (muscle buckets) in Verilog
+- [ ] Full brain on real FPGA hardware (Arty A7-100T)
 - [ ] More senses (nose touch, then food and steering)
 - [ ] The robot: real sensors and motors
 
@@ -45,8 +55,14 @@ worm's 300 neurons. Poke the head or tail and watch the brain decide which way t
 - `python/connectome_parser.py`: builds the network from the raw data (weights, sign rules)
 - `python/connectome_all.py`, `python/touch_circuit.py`: the generated networks (300 and 14 neurons)
 - `python/plot_run.py`, `python/golden.py`, `python/export_web.py`: plotting, golden files, website data
-- `verilog/`: LIF neuron, 4-neuron network and its self-checking testbench
+- `python/make_mem.py`: turns a network into the memory files the Verilog core loads
+- `verilog/core.v`: the scalable core (state machine, memories, all five jobs)
+- `verilog/lif_math.v`: the neuron update as pure math, used once by the core
+- `verilog/test_core_*.py`, `verilog/test_lif_math.py`: cocotb tests (one per job, plus golden-file replay)
+- `verilog/lif_neuron.v`, `verilog/snn_4neuron.v`, `verilog/test_bench.v`: the first hand-wired
+  4-neuron design and its testbench
 - `data/`: golden files (`chain_*` for 4 neurons, `full_*` for the whole brain)
+- `data/mem/`: memory files for the core (`chain/` and `full/`)
 - `docs/`: the demo website
 - `logs/log.md`: day-by-day development log
 
