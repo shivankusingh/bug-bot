@@ -409,15 +409,93 @@ Built the time-multiplexed Verilog core piece by piece, each with a cocotb test.
 - **`pipe_size` stays 8 bits unsigned in memory**; the extra 0 bit only exists in the math (`$signed({1'b0, size})`), so it's added once instead of stored 1,087 times.
 - **Board: Arty A7-100T**, using Vivado on my Windows laptop (Vivado doesn't run on Mac). The Kria KV260 is probably better for the fly, but harder to start on.
 
-## What I learned
-- **Time-multiplexing:** one `lif_math` circuit, a counter picks which memory slot it reads. The circuit doesn't grow with the network, only the memories do (Yosys schematic: ~178 parts for 4 or 300 neurons).
-- **Each state = one Python loop.** Nested loops become two counters in one state, one small action per tick.
-- **CSR:** `start[i]` is a slot number (where neuron i's links begin); neuron i's links are `start[i]` to `start[i+1] - 1`, so `start` has N + 1 entries. Receivers can point anywhere; only the reading order goes forward.
-- **`<=` snapshot rule:** every `<=` reads the values from before the tick, and if two `<=` set the same reg in one tick, the last one wins.
-- **wire vs reg:** a `reg` with `<=` remembers (ready next tick); a `wire` with `assign` is a live formula (ready this tick). In-between math (flow, packages) must be wires. `assign` goes outside `always`, one per wire.
-- **Counters need room for "one past the end":** a 1-bit counter can't reach 2, a 9-bit one can't reach 1,087 pipes.
-- **Width:** Verilog does the math in the width of the result, so `391 × 100` overflowed in 16 bits before the shift. `pipe_flow` is 20 bits.
-- **Signed:** if any part of an expression is unsigned, the whole thing is unsigned. `>>>` keeps the sign (rounds down like Python's `>>`), `>>` doesn't.
+## What I learned (my Verilog notes from building the core)
+
+### 1. The big idea: time-multiplexing
+- **One** neuron circuit (`lif_math`), placed once, always computing. A counter (`neuron_index`) picks which memory slot it reads; the `always` block saves its answer. Nothing is "called": the circuit just sits there, wired to whatever the counter points at.
+- The circuit doesn't grow with the network, only the memories do. Same design for 4 neurons or 300 (or 140,000 for the fly): you load different memory files.
+- Yosys schematic: ~178 parts for my core, and **137 of them are multiplexers** ("pick one" switches). Every `if/else` and every "which counter goes into this address" becomes one.
+
+### 2. wire vs reg (the most important rule)
+| | `reg` + `<=` (inside `always`) | `wire` + `assign` (outside `always`) |
+|---|---|---|
+| What it is | a box that **remembers** | a **formula** that's always live |
+| New value shows up | at the **end** of the tick (next tick) | **instantly**, the same tick |
+| Use for | things that must last: `voltages`, `totals`, counters, `state` | in-between math for right now: `pipe_flow`, spike packages, `lif_math` |
+- **One `assign` per wire**, and a wire can never feed itself. That's why `lif_math` needs a new name per step (`temp_voltage_holder`, `voltage_after_reset`, ...). One formula, but its **value** changes whenever its inputs change.
+- `assign` goes **outside** `always` (module level, next to the wires and module instances). Inside `always` you only use `<=`.
+- A wire **reads** a counter, it never changes it. Only the `always` block writes regs, and each reg is written from only one `always` block. Reading can happen anywhere.
+- Python picture: a wire is a little helper function that always uses the current loop variable; the `always` block is the loop, one pass per tick.
+- A wire isn't storage, so extra in-between wires cost no memory. Without `[...]` a wire is 1 bit (`new_spike`); with `[15:0]` it's 16.
+- A module's output has to drive a **wire**, not a memory slot directly.
+
+### 3. How a tick works: the snapshot rule
+- Each `posedge clk`: every `<=` line reads the values from the **start** of the tick (a snapshot), and all new values are saved together at the end. So one line can't see what another line just wrote that same tick.
+- **Last `<=` wins:** if two lines set the same reg (or the same memory slot) in one tick, only the last one counts. That's how my package got wiped by the flow line, and how `neuron_index <= 0` got overwritten by `+ 1`.
+- Different slots are fine: `totals[a]` and `totals[b]` can both be written in one tick (in simulation).
+- Lines **after** the end of an `if/else if` chain aren't inside any branch: they run **every** tick of that state. Put the "done" check, the work, and the counter move in one chain so exactly one branch runs.
+- `else` pairs with the nearest `if`. Separate `if`s can all run in the same tick; `if / else if / else` runs exactly one.
+- `=` is for `initial` blocks; inside `always @(posedge clk)` use `<=`. `+=` is not a `<=`, write `x <= x + y`.
+
+### 4. Memories
+- Declared `reg [width-1:0] name [0:depth-1];`. The left brackets are **bits per slot**, the right ones are **how many slots**. `[0:0]` is one slot, fine; `[0:-1]` (zero slots) isn't, which is why the chain gets a do-nothing pipe.
+- Write one slot per tick (`totals[i] <= 0`), never a whole memory at once.
+- An `initial` block runs once at the start: `$readmemh({MEM_DIR, "/file.mem"}, memory)` loads hex, one line per slot, and a `for` loop zeros `voltages`, `totals`, `spikes`.
+- `.mem` files are hex two's complement at the memory's width: in 11 bits, −400 → `670`, 300 → `12c`.
+- Icarus deletes memories that nothing ever writes or loads.
+- Real block RAM comes in fixed shapes (like 1K × 18 or 2K × 9), and the tools combine blocks automatically, so odd widths are fine. **Real BRAM answers a read one tick later** (two for a read inside a read): the main change for the board.
+
+### 5. Module structure (mistakes I made in the first version)
+- Parameters go in `#( ... )`, ports in `( ... )`; `localparam` goes in the body, not in `#()`. Memories aren't ports.
+- `endmodule` is one word. No semicolons after each port inside the parentheses (commas).
+- Parameters set sizes from outside (`N`, `N_LINKS`, `N_POKES`, `N_POKE_LINKS`, `N_PIPES`, `MEM_DIR`); the tests pass the worm's numbers, and the defaults are the chain's.
+- Inputs nobody drives are `x`/`z` (unknown), not 0. A reg nobody gave a starting value is `x`, and `x == N` is never true, so the chip hangs. Give every counter a start value right before the job that uses it.
+- Synchronous reset: `if (reset)` is the first check inside `always @(posedge clk)`.
+- `===` only works in simulation; use `==` in real designs.
+
+### 6. State machines
+- `localparam IDLE = 0, CLEAR = 1, ...` plus a `state` reg. These are **numbers**, not bit positions: a 3-bit `state` holds 0–7, room for 8 states. The order of jobs comes from each job's `state <= NEXT`, not the numbers.
+- Each tick, only the current state's branch runs. It's a Python `while` loop with `if/elif` on `state`.
+- `start_step` (a one-tick pulse from outside) starts a step; `busy` is 1 while it runs. IDLE is most of the time: the robot taps `start_step` on a timer (like 100 steps/sec), so the step rate is a knob.
+- My order: IDLE → CLEAR → POKES → SPIKES → PIPES → UPDATE → IDLE. SPIKES and PIPES must run **before** UPDATE, because UPDATE overwrites `spikes` (they need last step's) and `voltages` (pipes need start-of-step voltages). That's why one spike list is enough.
+- `== N` style: a job over N things takes N + 1 ticks (the last tick just says "done").
+
+### 7. Nested loops → two counters
+- Hardware can't run a `for` inside a `for` in one tick, so it's rewritten as one loop doing **one small action per tick**, with two counters in one state:
+  1. all done? → next state
+  2. this one is off, or its range is used up? → next one (the jump)
+  3. otherwise → do one link, `slot + 1`
+- POKES: `poke_index` (which poke) + `slot` (which link). SPIKES: `neuron_index` (which sender) + `slot_spikes` (which link). Two counters because the outer one must **stay put** while the inner one walks.
+- `pokes` is an **input port**, not memory: `pokes[poke_index]` is "is this poke touched right now", set from outside before `start_step`.
+
+### 8. CSR (the wiring format)
+- All senders' link lists glued into flat lists (`link_receiver`, `link_weight`), plus `start`, where `start[i]` is the **slot number** where sender i's links begin. Sender i owns slots `start[i]` to `start[i+1] - 1`, so `start` has **N + 1** entries (the last one is the end marker).
+- One slot = one link (one receiver + its weight). A receiver can appear many times (once per sender that talks to it), and can point to any neuron, earlier or later. Only the **reading** order goes forward, grouped by sender.
+- Start lists are grouped by **who sends**: `poke_start` per poke, `start` per neuron.
+- `slot == start[neuron_index + 1]` means "this sender is done" (like Python's `range`, which stops before the end). A sender with no links is done instantly (`start[i] == start[i+1]`).
+- Set `slot` once at the start of the job; after that it only moves forward (deliver: + 1, jump: to `start[neuron_index + 1]`).
+- **Jumps** skip senders that didn't fire in one tick: a quiet worm step went from ~4,650 to 912 ticks.
+- I rejected a bitmap (one bit per possible pair) because the worm is sparse: most pairs aren't connected.
+- Pipes don't use CSR or jumps: flow runs whenever two voltages differ, so every pipe is visited every step, and a flat list with one counter is enough.
+
+### 9. Bits, widths and counting
+- A counter needs room for **one past the end**: `poke_index` must reach 2 (not 1-bit), the pipe counter must reach 1,087 (not 9-bit, max 511). Too small → it wraps to 0 like an odometer and loops forever.
+- Bits needed: receivers 9 (neurons 0–299), weights 11 signed (−750..710), `start` 12 (up to 3,744), voltages stay −512..255.
+- **Verilog does the math in the width of the result:** with a 16-bit `pipe_flow`, `391 × 100 = 39,100` overflowed before the shift. Worst case 767 × 250 = 191,750 needs 19 bits signed, so `pipe_flow` is 20.
+
+### 10. Signed numbers
+- Bits don't know they're negative; `signed` tells Verilog how to **read** them. `1111 1010` is 250 unsigned, −6 signed.
+- **If any part of an expression is unsigned, the whole thing is unsigned**, even parts declared signed. Declaring the left side `signed` doesn't fix the right side.
+- `>>>` keeps the sign (rounds down, like Python's `>>`); `>>` fills with 0s and turns negatives into big positives. `>>>` only acts signed on signed values.
+- `$signed({1'b0, size})`: `{ }` glues bits together, `1'b0` is one 0 bit. The 0 on top keeps a size like 250 positive when read as signed. The extra bit lives only in the math circuit, not in all 1,087 memory slots (8 bits stored instead of 11).
+- The **sign** of the flow comes from the voltage difference, the size is always positive.
+- If a value can be negative, declare it `signed`.
+
+### 11. Tools and the board
+- Compile check: `iverilog -t null verilog/core.v verilog/lif_math.v`. "Unable to bind" = a name was never declared. "Not a valid l-value for a procedural assignment" = an `assign` (or a write to a wire) inside `always`.
+- Tests: cocotb runs Icarus from Python. Each job's test checks `totals` first (where the mail went), then voltages and spikes; the golden test replays my notebook's files.
+- Yosys + Graphviz / netlistsvg draw schematics. Fine for `lif_math`, spaghetti for `core`: that's why people draw block diagrams.
+- Board: Arty A7-100T. Vivado runs on Windows/Linux, not macOS. On a real board there's no `print`: I'll need UART or Vivado's logic analyzer, a constraints file for the pins and clock, and the BRAM read delay.
 
 ## Mistakes fixed
 - Counters never given a starting value (stuck at `x`), lines outside the `if/else` chain running every tick, the done check using `N` instead of `N_PIPES`, packages and flow held in regs (one tick late), the package including the neuron's whole total (counted it twice).
