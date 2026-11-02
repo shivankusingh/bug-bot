@@ -26,17 +26,21 @@ Running the C. elegans connectome (302 neurons) as a spiking neural network on a
   - `python/touch_test.ipynb`: touch test on the real connectome
   - `python/plot_run.py`: plots a run (raster, which way is winning, motors, wheels if passed `wheels=`, voltage map)
   - `python/golden.py`: `save_golden(...)` writes a run as golden files into `data/` (called from `touch_test.ipynb`)
+  - `python/make_mem.py`: writes the `.mem` files the Verilog core loads (`data/mem/chain/`, `data/mem/full/`): CSR wiring for links and pokes, flat pipe lists. Rerun when the network changes. The chain gets one do-nothing pipe (size 0) because a Verilog memory can't have 0 slots.
 - `verilog/`: RTL design files and testbenches
 - `data/`: golden vectors and connectome data files (`data/raw/` holds the downloaded spreadsheets; ignored by git)
 - `logs/`: day-by-day project log
 - `docs/`: the demo website, published by GitHub Pages (`index.html` = visualizer, `run.json` = a model run). `run.json` is written by `python/export_web.py` from `touch_test.ipynb`; rerun that cell whenever the model changes.
 - Python runs via `.venv/bin/python` (local virtual environment with numpy, matplotlib, openpyxl and cocotb; ignored by git).
-- Simulation tools (Homebrew): Icarus Verilog 13 (`iverilog`, `vvp`), Surfer waveform viewer (`surfer`). cocotb runs Icarus through `cocotb_tools.runner`; pass `timescale=("1ns", "1ps")` since the Verilog files don't declare one.
+- Simulation tools (Homebrew): Icarus Verilog 13 (`iverilog`, `vvp`), Surfer waveform viewer (`surfer`), Yosys + Graphviz (schematics and later fit checks). Compile check: `iverilog -t null verilog/core.v verilog/lif_math.v`.
+- FPGA board plan: Digilent Arty A7-100T (Artix-7, ~4.9 Mbit BRAM, 256 MB DDR3), with Vivado on a Windows laptop (Vivado doesn't run on macOS). Not bought yet (the plan was to buy once the core matches in simulation, which it now does); Kria KV260 considered for the fly later. cocotb runs Icarus through `cocotb_tools.runner`; pass `timescale=("1ns", "1ps")` since the Verilog files don't declare one.
 
 ## Current state
 - 4-neuron test network: A → B → C chain, plus inhibitory neuron I onto B.
 - Verilog: `lif_neuron` module (3 weighted inputs, parameters for weights) instantiated 4 times in `top_module`, hand-wired. Passes a self-checking testbench against Python golden vectors.
-- Verilog, scalable core (in progress): `lif_math.v` = the neuron update as pure math (only `assign`, no memory inside; inputs `old_voltage`, `total`; outputs `new_voltage`, `spike`; includes the −512 floor). Verified against Python `neuron_model` by `verilog/test_lif_math.py` (cocotb, 27,648 cases incl. every edge). Run: `.venv/bin/python verilog/test_lif_math.py`.
+- Verilog, scalable core ✅ (simulation): `core.v` runs the **full 300-neuron worm** and matches the full-network golden files for all 80 steps (and the 4-neuron chain files). One `lif_math` instance, time-multiplexed over all neurons by a state machine: IDLE → CLEAR → POKES → SPIKES → PIPES → UPDATE → IDLE, started by a one-tick `start_step` pulse, `busy` high while a step runs (~2,100 ticks per worm step, ~21 µs at 100 MHz). Wiring loaded from `.mem` files (`MEM_DIR`), sizes set by parameters `N`, `N_LINKS`, `N_POKES`, `N_POKE_LINKS`, `N_PIPES`. SPIKES skips neurons that didn't fire (one tick each); PIPES visits every pipe (flow always runs). Pipe math uses wires (`assign`), 20-bit signed `pipe_flow`, and `$signed({1'b0, pipe_size})` so the 8-bit unsigned size stays positive.
+  - `lif_math.v` = the neuron update as pure math (only `assign`, no memory inside; includes the −512 floor). Verified by `verilog/test_lif_math.py` (27,648 cases).
+  - Tests (cocotb, run from the repo root as `.venv/bin/python verilog/<test>.py`): `test_core_memories` (every memory loads), `test_core_clear`, `test_core_pokes`, `test_core_spikes`, `test_core_pipes` (each job vs a Python model, checking `totals` first), `test_core_golden` (chain, or `full` as an argument: replays the golden files). Clear/pokes/spikes tests switch pipes off by writing `pipe_size` to 0.
 - Python reference model uses **sparse connection lists** and is verified to reproduce the original golden files exactly.
 - Real connectome loaded in Python: 300 neurons, 3,669 chemical connections + 75 one-way "circuit pipe" links, 1,087 pipes (Cook 2019 wiring, Fenyves 2020 signs). Settings: `K = 10`, `SIGN_ORDER = circuit → table → gaba`, table "complex" → −, `pipe_shift = 10`, `PIPE_K = 1`.
 - Sign rules: `CIRCUIT` tags 53 neurons with (team, layer): touch sensors, command neurons, motor neurons (DA/VA backward, DB/VB forward). `circuit_rule`: only downstream or command ↔ command; same team → +, opposite → −; anything else → None (table decides).
@@ -67,7 +71,9 @@ Any change to the Python model must reproduce the existing golden files exactly 
 ## Known issues
 - `neuron_model` is copied in two notebooks (`bug_bot.ipynb`, `touch_test.ipynb`); any math change must go into both. Possible later cleanup: one shared `neuron.py`.
 - Verilog: 16-bit `total`/`voltage` with no saturation (a huge `total` would wrap around; Python never wraps). The old `lif_neuron.v` has **no voltage floor**; `lif_math.v` does and replaces it in the new core (doesn't affect the current 4-neuron golden files, whose lowest voltage is −400).
-- One module instance per neuron won't scale to 302.
+- The old hand-wired `top_module` (one `lif_neuron` per neuron) doesn't scale; the time-multiplexed `core.v` replaces it.
+- `core.v` reads its memories instantly (like simulation registers). Real block RAM answers one tick later, and reads inside reads (`totals[link_receiver[slot]]`) take two. Yosys already turns `link_receiver` and `poke_receiver` into plain registers because of this. The jobs will need small changes (wait for the data) at the FPGA board stage.
+- `PIPE_K` and `pipe_shift` in `core.v` are regs set during the step; they could be `localparam` constants.
 - Most real C. elegans neurons use graded potentials, not spikes. LIF is a deliberate simplification. Because a firing neuron resets to 0, pipes can't pass activity well; spike packages and circuit pipe links are workarounds.
 - Only one behavior test so far (head + tail touch). Risk of tuning to that one test (overfitting): add more tests before tuning further.
 - Pushback margin: forward motors push about +30/step back into AVBL (settles ~240, threshold 256). Rerun the head + tail test after changing `K` or `PIPE_K`.
@@ -77,7 +83,7 @@ Any change to the Python model must reproduce the existing golden files exactly 
 2. ✅ Load the real connectome (Cook et al. 2019 + Fenyves et al. 2020). Parser outputs the `connections` and `pipes` format.
 3. ✅ Sanity check: head touch → backward, tail touch → forward, in Python.
 4. ✅ Python reference done: motor readout, voltage floor (16-bit safe), full-network golden files, demo website, local sim flow (Icarus + cocotb + Surfer). Senses (nose touch first) come later.
-5. Hardware: time-multiplexed core: one neuron-update unit (`lif_math.v` ✅: pure math, no memory inside) looping over all neurons. Memories in BRAM: `voltages`, `totals`, one `spikes` list, wiring as CSR (`LINKS` + `START`, `POKE_LINKS` + `POKE_START`) and a flat `PIPES` list. Two-phase step: phase 1 = clear totals, deliver spikes, deliver pokes, pipes (all into `totals`, reading start-of-step voltages and last step's spikes); phase 2 = update neurons (writes `voltages` and `spikes`). Phases never overlap, so one spike list is enough (no double buffering); overlapping phases is a possible later speed-up (maybe for the fly). External RAM only later, for the fly. First test: load the 4-neuron network from memory files and match its output.
+5. ✅ (in simulation) Hardware: time-multiplexed core: one neuron-update unit (`lif_math.v` ✅: pure math, no memory inside) looping over all neurons. `core.v` ✅ matches the full-worm golden files. Next: muscle readout in Verilog, then BRAM read timing for the board. Memories in BRAM: `voltages`, `totals`, one `spikes` list, wiring as CSR (`LINKS` + `START`, `POKE_LINKS` + `POKE_START`) and a flat `PIPES` list. Two-phase step: phase 1 = clear totals, deliver spikes, deliver pokes, pipes (all into `totals`, reading start-of-step voltages and last step's spikes); phase 2 = update neurons (writes `voltages` and `spikes`). Phases never overlap, so one spike list is enough (no double buffering); overlapping phases is a possible later speed-up (maybe for the fly). External RAM only later, for the fly. First test: load the 4-neuron network from memory files and match its output.
 6. FPGA board + robot I/O (sensors → sensory neurons, motor neurons → motors), then RL.
 7. Later: scale to the fruit fly connectome.
 

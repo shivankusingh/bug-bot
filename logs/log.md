@@ -383,3 +383,46 @@ Saved my 300-neuron head + tail run as golden files: the answer key my future sc
 1. Demo website: my model exports runs, Claude builds the visualizer. Preview privately, then GitHub Pages + a GIF in the README.
 2. Senses: nose touch first.
 3. Verilog: scalable core, matched against the 4-neuron and full-network golden files.
+
+
+# bug-bot log: Oct 30 – Nov 1, 2026: scalable Verilog core runs the whole worm
+
+## Summary
+Built the time-multiplexed Verilog core piece by piece, each with a cocotb test. **`core.v` now runs the full 300-neuron worm and matches my Python golden files for all 80 steps**, every voltage and every spike. Each step takes about 2,100 ticks (~21 µs at 100 MHz); the robot only needs one step every 10 ms.
+
+## What I did
+| Piece | What it is |
+|---|---|
+| `lif_math.v` | the neuron update as pure math (only `assign`), tested on 27,648 cases |
+| Memories | wiring loaded from `.mem` files with `$readmemh` (CSR for links and pokes, a flat list for pipes); `voltages`, `totals`, `spikes` zeroed at start |
+| State machine | IDLE → CLEAR → POKES → SPIKES → PIPES → UPDATE → IDLE. `start_step` starts a step, `busy` says it's running |
+| CLEAR / UPDATE | walk `neuron_index` over all neurons (`== N` means done) |
+| POKES | two counters: which poke, and which link (`slot`); a poke is done when `slot == poke_start[poke_index + 1]` |
+| SPIKES | the same pattern over neurons, with a **jump**: a neuron that didn't fire is skipped in one tick (quiet step: 912 ticks instead of ~4,650) |
+| PIPES | one tick per pipe: flow + spike packages into `totals[a]` and `totals[b]` |
+
+- Claude wrote the tooling: `python/make_mem.py` (the `.mem` files) and the tests (`test_core_memories/clear/pokes/spikes/pipes/golden`). I wrote all of `core.v`.
+
+## Decisions
+- **One spike list**, no double buffering: the jobs never overlap, and SPIKES and PIPES run before UPDATE overwrites `spikes`.
+- **SPIKES jumps over silent neurons**, PIPES doesn't: flow runs whenever two voltages differ, so every pipe is visited every step.
+- **`pipe_size` stays 8 bits unsigned in memory**; the extra 0 bit only exists in the math (`$signed({1'b0, size})`), so it's added once instead of stored 1,087 times.
+- **Board: Arty A7-100T**, using Vivado on my Windows laptop (Vivado doesn't run on Mac). The Kria KV260 is probably better for the fly, but harder to start on.
+
+## What I learned
+- **Time-multiplexing:** one `lif_math` circuit, a counter picks which memory slot it reads. The circuit doesn't grow with the network, only the memories do (Yosys schematic: ~178 parts for 4 or 300 neurons).
+- **Each state = one Python loop.** Nested loops become two counters in one state, one small action per tick.
+- **CSR:** `start[i]` is a slot number (where neuron i's links begin); neuron i's links are `start[i]` to `start[i+1] - 1`, so `start` has N + 1 entries. Receivers can point anywhere; only the reading order goes forward.
+- **`<=` snapshot rule:** every `<=` reads the values from before the tick, and if two `<=` set the same reg in one tick, the last one wins.
+- **wire vs reg:** a `reg` with `<=` remembers (ready next tick); a `wire` with `assign` is a live formula (ready this tick). In-between math (flow, packages) must be wires. `assign` goes outside `always`, one per wire.
+- **Counters need room for "one past the end":** a 1-bit counter can't reach 2, a 9-bit one can't reach 1,087 pipes.
+- **Width:** Verilog does the math in the width of the result, so `391 × 100` overflowed in 16 bits before the shift. `pipe_flow` is 20 bits.
+- **Signed:** if any part of an expression is unsigned, the whole thing is unsigned. `>>>` keeps the sign (rounds down like Python's `>>`), `>>` doesn't.
+
+## Mistakes fixed
+- Counters never given a starting value (stuck at `x`), lines outside the `if/else` chain running every tick, the done check using `N` instead of `N_PIPES`, packages and flow held in regs (one tick late), the package including the neuron's whole total (counted it twice).
+
+## Next steps
+1. Muscle-bucket readout in Verilog (motor neurons → wheels).
+2. Buy the Arty A7-100T; learn the BRAM read delay (reads take a tick) and adapt the jobs.
+3. Later speed-ups: clear totals during UPDATE, a list of who fired, store weights ÷ 10 (all are multiples of 10, saves 3 bits per link).
