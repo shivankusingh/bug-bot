@@ -594,3 +594,68 @@ Ran the core through Vivado for the first time. It fit on the chip, but used 42%
 2. Rerun synthesis. The warning should go away and flip-flops should drop to a few hundred.
 3. Add a 100 MHz clock constraint. Without one, synthesis says nothing about speed.
 4. Update `CLAUDE.md`: ticks per step, and the note that says `link_receiver` becomes registers.
+
+
+# bug-bot log: Nov 4, 2026 (later): synthesis rerun after Fix 1, `totals` fits
+
+## Summary
+Reran Vivado synthesis with the two-tick PIPES change (Fix 1). The `totals` warning is gone and the core shrank from 42% of the LUTs to 2.4%. `totals` is now LUT RAM, like `voltages` and `spikes`. Fix 1 alone was enough for the worm, so Fix 2 and the BRAM read timing move to the fly stage.
+
+## What I did
+- Pulled the Fix 1 commit onto the Windows laptop and ran all 7 core tests (Icarus 12): all pass. The full golden run went from 1,702,725 ns to 2,572,325 ns: exactly 1,087 extra ticks per step, one per pipe (~21 → ~32 µs per step).
+- Reran synthesis in the same Vivado project (same part and full-worm parameters). All 9 `.mem` files read.
+
+| Resource | Before Fix 1 | After Fix 1 |
+|---|---|---|
+| Warnings | 1 (`totals_reg` in registers) | **0** |
+| LUTs | 26,381 (42%) | **1,545 (2.4%)** |
+| LUT as memory | 290 | 912 |
+| Flip-flops | 5,021 | **54** |
+| F7 / F8 muxes | 2,616 / 1,168 | 169 / 0 |
+| BRAM tiles | 4 | 4 |
+| DSP | 1 | 1 |
+
+| Memory | Before Fix 1 | After Fix 1 |
+|---|---|---|
+| `link_receiver`, `link_weight`, `pipe_a`, `pipe_b`, `pipe_size` | BRAM | BRAM |
+| `start` | LUT ROM | LUT ROM |
+| `voltages`, `spikes` | LUT RAM | LUT RAM |
+| `totals` | 4,800 flip-flops + selectors | **LUT RAM** |
+
+- Updated `CLAUDE.md`: ticks per step, PIPES two ticks per pipe, synthesis results, the Yosys/BRAM note, the Windows setup, and the roadmap.
+
+## Decisions
+- **Fix 2 (one write line for `totals`) is not needed for the worm.** Vivado accepted the five separate write lines once no tick wrote twice. Keeping it for the fly, where `totals` has to be BRAM.
+- **BRAM read timing (ask-then-use) moves to the fly stage.** The worm's state fits in LUT RAM, which reads instantly, and the wiring tables already reach BRAM through the merged address registers. So the worm needs no read-tick changes for the board.
+- Fly sizes, for later: fly `totals` alone is 140,000 × 16 bits ≈ 2.2 Mbit, but the Arty has only ~1.2 Mbit of LUT RAM in total (and ~4.9 Mbit of BRAM). So the fly needs BRAM for its state, and DDR for its wiring.
+
+## What I learned
+
+### 1. Three kinds of storage, not two
+| | Read | Writes per tick | Good for |
+|---|---|---|---|
+| Flip-flops (sticky notes) | Instant | Any number | A few values; costly for lists |
+| LUT RAM (small drawers) | Instant | 1 | Small lists (the worm's 300 neurons) |
+| BRAM (filing cabinet) | One tick later | 2 doors, shared by reads and writes | Big lists (the fly) |
+
+- Fix 1 made `totals` legal for LUT RAM (one write per tick). It still isn't legal for BRAM, because each tick reads and writes back in the same tick, and BRAM's answer comes a tick late. Vivado picks the cheapest storage that's legal, so it chose LUT RAM.
+
+### 2. The flip-flops were what cost the LUTs
+- Removing 4,800 flip-flops also removed ~25,000 LUTs. Those were the 300-way selectors needed to read and write a flip-flop array at a changing address. As RAM, a read is one lookup.
+- LUT as memory went up (290 → 912) because `totals` is read at several different addresses (the neuron being updated, link receivers, pipe sides a and b), and LUT RAM makes a copy for each read address. Still far cheaper than flip-flops.
+
+### 3. Predictions were wrong in a good way
+- The last log predicted flip-flops would drop to "a few hundred" after Fix 2. They dropped to 54 after Fix 1 alone.
+- Claude predicted the warning might stay (read and write in one tick). That's true for BRAM, but Vivado used LUT RAM instead. Run the tool, don't guess.
+
+### 4. `#1` is not a way to wait
+- `#1` only exists in simulation; Vivado ignores it. Waiting a tick in hardware means a reg that remembers where you are (like `flipflopper` or `state`) and doing the next part on the next tick. A value written with `<=` is ready on the next tick.
+
+## Mistakes fixed
+- None this time. All tests passed on the first run.
+
+## Next steps
+1. Muscle-bucket readout in Verilog (motor neurons → wheels).
+2. Add a 100 MHz clock constraint (a small `.xdc`) to see whether the core is fast enough. Synthesis alone says nothing about speed.
+3. Maybe a Tcl script that rebuilds the Vivado project in one command, so the project folder doesn't have to be remembered or copied.
+4. Fly stage, later: ask-then-use reads and one write line for `totals`, so the state can live in BRAM.
