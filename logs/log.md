@@ -504,3 +504,93 @@ Built the time-multiplexed Verilog core piece by piece, each with a cocotb test.
 1. Muscle-bucket readout in Verilog (motor neurons → wheels).
 2. Buy the Arty A7-100T; learn the BRAM read delay (reads take a tick) and adapt the jobs.
 3. Later speed-ups: clear totals during UPDATE, a list of who fired, store weights ÷ 10 (all are multiples of 10, saves 3 bits per link).
+
+
+# bug-bot log: Nov 4, 2026: first Vivado synthesis, and why `totals` didn't fit
+
+## Summary
+Ran the core through Vivado for the first time. It fit on the chip, but used 42% of the LUTs because `totals` was built out of flip-flops instead of a RAM. The cause is that PIPES wrote `totals` twice in one tick. Split PIPES into two ticks per pipe (Fix 1). All tests still pass and the full worm still matches the golden files. Fix 2 (one write line for `totals`) is next, and I haven't rerun synthesis yet.
+
+## What I did
+- Ran Vivado 2026.1 synthesis on the Windows laptop (synthesis only, no clock constraint) for `core.v` + `lif_math.v`, part `xc7a100tcsg324-1` (Arty A7-100T), full-worm parameters. All 8 cocotb tests also pass on Windows (Icarus 12).
+- Result: 0 errors, 0 critical warnings, 1 warning, all 9 `.mem` files read.
+
+| Resource | Used |
+|---|---|
+| LUTs | 26,381 (42%) |
+| LUT as distributed RAM | 290 |
+| Flip-flops | 5,021 (4%) |
+| BRAM tiles | 4 (2 RAMB36 + 4 RAMB18) |
+| DSP | 1 (`pipe_flow`'s multiply) |
+
+- The warning: `[Synth 8-4767] Trying to implement RAM 'totals_reg' in registers`, pointing at `core.v:175`. Reason 1: "RAM has multiple writes via different ports in same process". Reasons 2–6: "Invalid write to RAM". Reason 7: "No valid clock found for write to RAM".
+
+| Memory | Vivado built it as |
+|---|---|
+| `link_receiver`, `link_weight`, `pipe_a`, `pipe_b`, `pipe_size` | Block RAM |
+| `start` | LUT ROM |
+| `voltages`, `spikes` | LUT RAM |
+| `totals` | 4,800 flip-flops + big selectors |
+
+- Fix 1: added a one-bit reg, `flipflopper`, so each pipe takes two ticks: side a, then side b. `neuron_index` only moves on after side b.
+
+## Decisions
+- **My first idea:** a one-bit "read or write" signal. Read and do the math on one tick, save the result in a reg, write it on the next tick. This doesn't fix pipes alone, because both writes still land on the same write tick. To work, it would need four ticks (read a, write a, read b, write b), so two bits.
+- **What I did instead:** kept one bit, but made it mean "side a or side b". LUT RAM reads are instant, so a separate read tick isn't needed yet.
+- **Keeping the read/write idea for later:** BRAM answers one tick late, so the jobs will need a read tick at the BRAM stage. A BRAM read tick can only send the address, because the value isn't there yet, so the math happens on the next tick.
+- Two ticks per pipe costs 1,087 extra ticks per step: about 2,100 → 3,200 ticks, or 21 → 32 µs at 100 MHz. That's fine for the worm.
+- Doing it in two ticks doesn't change the math: `voltages` and `spikes` don't change during PIPES, additions can go in any order, and no pipe connects a neuron to itself. The golden files still match.
+
+## What I learned
+
+### 1. What's on the chip
+| | Job | Think of it as | Read speed | Arty A7-100T has |
+|---|---|---|---|---|
+| LUT | Logic | A tiny list of pre-written answers | Instant | ~63,400 |
+| Flip-flop | Remembers 1 bit | A sticky note | Instant | ~126,800 |
+| BRAM | Stores lots of data | A filing cabinet | One tick later | 135 blocks (36 Kbit each, ~4.9 Mbit) |
+
+- **LUT:** it doesn't calculate, it looks up. AND is just `answers = [0, 0, 0, 1]` and `out = answers[a*2 + b]`. Each LUT on this chip has 6 inputs, so 64 stored answers. Change the answers and it does a different job.
+- **LUT RAM (distributed RAM):** using a LUT's 64 answers as a tiny memory. Instant reads, one write per tick. Great for small memories, wasteful for big ones.
+- **On a chip, every branch is real circuitry.** It takes up space even when it isn't used.
+
+### 2. Why two writes in one tick break a RAM
+- A RAM's write door is a real bundle of wires, one for the address and one for the data. A wire carries one number at a time. With a pipe between neurons 12 and 57, the address wires would have to say 12 and 57 at once.
+- Python runs two lines one after the other. In an `always` block, both happen on the same tick.
+- Flip-flops can do it because each one has its own wires. That's why Vivado fell back to them.
+
+| Memory | Doors | One pipe in one tick needs | Fits? |
+|---|---|---|---|
+| LUT RAM | 1 write door + instant reads | 2 writes | No |
+| BRAM | 2 doors, shared by reads and writes | 2 reads + 2 writes = 4 | No |
+
+- BRAM could do two writes in one tick. The problem is the reads each pipe needs as well, which makes four accesses.
+
+### 3. Why it cost 42% of the LUTs
+- 300 neurons × 16 bits = 4,800 flip-flops, which is 96% of all 5,021.
+- As a RAM, `totals[i]` is one lookup. As flip-flops, it's like 300 separate variables and an `if/elif` chain with 300 branches, for all 16 bits, repeated everywhere the code reads `totals`. Those selectors are probably most of the 26,381 LUTs.
+- For comparison, `voltages` and `spikes` together use 290 LUTs of RAM.
+
+### 4. Which lines caused it
+- `core.v` lines 174–175 (before the fix) were the definite cause: two writes to two different addresses on one tick.
+- `totals` is also written from five separate lines (110, 126, 152, 174, 175), each with a different address. `voltages` has one (line 193). Each of those other lines only writes once per tick, so they never collide, but they may still be why Vivado says "Invalid write". The full log would show which line each reason refers to.
+- Line 77 reads `totals[neuron_index]` instantly. That doesn't cause this warning, but it would keep `totals` out of BRAM later.
+
+### 5. Regs and wires don't lose values
+- Every `<=` updates at the same clock edge. The `assign` wires then recalculate during the tick, and the next edge uses the results. Nothing gets lost in that handoff.
+- But a wire always shows its current inputs. `pipe_flow` depends on `neuron_index`, so `neuron_index` has to stay put for both sides of a pipe.
+
+### 6. A passing test can prove less than it looks like
+- The chain golden test passed while pipes were broken, because the chain's only pipe has size 0, so it adds nothing. `test_core_pipes` and the full golden test caught it.
+
+### 7. Yosys isn't Vivado
+- Yosys turns `link_receiver` into plain registers, but Vivado put it in BRAM by merging the address registers into it (`_reg_rep` in the log). Different tools make different choices, so check the real one.
+
+## Mistakes fixed
+- Left `neuron_index <= neuron_index + 1` outside the new `if/else`, so it ran every tick and moved on after side a. Half the pipe writes were skipped: pipe 0 side a, pipe 1 side b, pipe 2 side a, and so on. `test_core_pipes` failed (`totals[1]` was 300, should be 400) and the full golden test failed at step 1 (4 neurons differ, e.g. PVR (#129): 67, should be 70). Moving the line so it only runs on side b fixed it. This is the same mistake as before: a line outside the `if/else` runs every tick.
+
+## Next steps
+1. Fix 2: one write line for `totals`, fed by wires that pick the address and value for each state. Watch out for: copying the exact `if` conditions (some ticks write nothing), using wires rather than `<=` for the write signals (or the write comes a tick late and a second link to the same neuron loses the first), and resetting anything new.
+2. Rerun synthesis. The warning should go away and flip-flops should drop to a few hundred.
+3. Add a 100 MHz clock constraint. Without one, synthesis says nothing about speed.
+4. Update `CLAUDE.md`: ticks per step, and the note that says `link_receiver` becomes registers.
