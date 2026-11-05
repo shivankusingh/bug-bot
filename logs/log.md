@@ -651,6 +651,63 @@ Reran Vivado synthesis with the two-tick PIPES change (Fix 1). The `totals` warn
 ### 4. `#1` is not a way to wait
 - `#1` only exists in simulation; Vivado ignores it. Waiting a tick in hardware means a reg that remembers where you are (like `flipflopper` or `state`) and doing the next part on the next tick. A value written with `<=` is ready on the next tick.
 
+### 5. Timing: think of a bell
+- The clock is a **bell** that rings over and over. One bell to the next is one **tick**. All the work between two bells has to finish before the next one, because that's when the answer gets saved. If it isn't done, the chip saves a wrong number.
+- **100 MHz means the bell rings every 10 ns**, so each tick gets 10 ns.
+- A tick isn't a step. One **step** (one full update of the worm) takes ~3,200 ticks, or ~32 µs at 100 MHz. Each tick does one small item from that step's to-do list.
+
+| Job in one step | Ticks |
+|---|---|
+| CLEAR | ~300 |
+| POKES | A few |
+| SPIKES | ~300 and up, depending on who fired |
+| PIPES | ~2,174 |
+| UPDATE | ~300 |
+
+- All ticks are the same length, so **the slowest tick sets the speed for all of them**, even the easy ones. If one tick needs 13 ns, every tick has to be at least 13 ns long.
+
+### 6. The clock constraint
+- It's one line in an `.xdc` file that tells Vivado how long a tick is: `create_clock -period 10 [get_ports clk]`. Without it, Vivado has no target, so the report has no slack for my clock.
+- **Slack** is the time left over on the slowest path. Positive means it fits, negative means it's too slow. It's shown as WNS in Report Timing Summary.
+- Top speed in MHz = 1000 ÷ (10 − WNS), when the period is 10 ns:
+
+| WNS | Slowest path | Top speed |
+|---|---|---|
+| +2 ns | 8 ns | 125 MHz |
+| 0 ns | 10 ns | 100 MHz |
+| −3 ns | 13 ns | ~77 MHz |
+
+### 7. Synthesis vs implementation
+- **Synthesis** turns my Verilog into LUTs, RAMs and registers. Its timing is an estimate, because it doesn't know the wire lengths yet.
+- **Implementation** places everything on the chip and connects it, so now it knows where every wire goes. Wires take time too, so this is the number that counts.
+- **Run Implementation** reruns synthesis first if it's out of date.
+- I don't need the board for this. Vivado calculates the times from its data about the chip, using worst-case numbers.
+
+### 8. "Sub-optimal timing" means take the number from a desk, not the cabinet
+- Vivado printed `INFO` messages saying the BRAM timing "might be sub-optimal". They aren't errors, and nothing is broken.
+- BRAM is a slow filing cabinet. If I grab a number straight from it, the walk uses up part of the tick and leaves less time for the math. With made-up numbers:
+
+```
+bell ──── walk to the cabinet (3) ──── math (7 left) ──── bell
+```
+
+- BRAM has an optional extra register at its exit, like a desk the cabinet can put the number on. The math then gets the whole tick, but the read takes one more tick:
+
+```
+bell ──── cabinet puts the number on the desk ──── bell
+bell ──── math (the full 10) ──────────────────── bell
+```
+
+- My code uses the BRAM value straight away, so Vivado has no register to merge in there. The message is saying it works, but could be faster with a desk.
+
+### 9. How to go faster (for later)
+- What I really want to shrink is **time per step = ticks per step × time per tick**.
+- **Shorter ticks:** split a long path with registers, like doing the multiply on one tick and the add on the next.
+- **Fewer ticks:** skip work, like clearing `totals` during UPDATE (saves up to 300 ticks).
+- More MHz doesn't always mean a faster step, because splitting adds ticks. If PIPES went from 2 to 4 ticks per pipe at 200 MHz: ~3,200 ticks × 10 ns = ~32 µs becomes ~5,400 ticks × 5 ns = ~27 µs. Twice the clock speed, but only about 16% faster.
+- **Pipelining** gets around that, and has nothing to do with my neuron pipes. It's like laundry: the washer can start a new load while the last one is in the dryer. Each pipe still goes through several stages, but a new one could start every tick.
+- PIPES is about two-thirds of the ticks in a step, so it's the best place to start. Measure first, so I work on the path that's actually slowest.
+
 ## Mistakes fixed
 - None this time. All tests passed on the first run.
 
