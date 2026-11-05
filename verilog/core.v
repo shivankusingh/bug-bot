@@ -52,6 +52,7 @@ module core #(
     reg signed [15:0] pipe_flow_addition;
     reg flipflopper;
     reg flipflop_pipe_flow;
+    reg neuron_index_flipflop_update;
     reg [7:0] pipe_size_to_reg;
     wire signed [15:0] totals_temp_val_holder_a;
     wire signed [15:0] totals_temp_val_holder_b;
@@ -74,8 +75,9 @@ module core #(
 
     reg [10:0] neuron_index; 
     wire signed [15:0] new_voltage;
+    reg signed [15:0] new_voltage_reg;
     wire new_spike;
-    
+    reg new_spike_reg;
     lif_math neuron_math(
         .old_voltage(voltages[neuron_index]),
         .total(totals[neuron_index]),
@@ -172,6 +174,7 @@ module core #(
                 neuron_index <= 0;
                 flipflopper <= 0;
                 flipflop_pipe_flow <= 0;
+                neuron_index_flipflop_update <= 0;
             end
             
             else begin
@@ -215,11 +218,21 @@ module core #(
                 state <= IDLE;
                 busy <= 0;
                 neuron_index <= 0;
+                neuron_index_flipflop_update <= 0;
             end
             else begin
-                voltages[neuron_index] <= new_voltage;
-                spikes[neuron_index] <= new_spike;
+                if (neuron_index_flipflop_update == 0) begin
+                    neuron_index_flipflop_update <= 1;
+                    new_voltage_reg <= new_voltage;
+                    new_spike_reg <= new_spike;
+                end
+                else begin 
+                    neuron_index_flipflop_update <= 0;
+                    voltages[neuron_index] <= new_voltage_reg;
+                spikes[neuron_index] <= new_spike_reg;
                 neuron_index <= neuron_index + 1;
+                end
+                
             end
         end
         
