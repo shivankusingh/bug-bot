@@ -708,6 +708,64 @@ bell ──── math (the full 10) ──────────────�
 - **Pipelining** gets around that, and has nothing to do with my neuron pipes. It's like laundry: the washer can start a new load while the last one is in the dryer. Each pipe still goes through several stages, but a new one could start every tick.
 - PIPES is about two-thirds of the ticks in a step, so it's the best place to start. Measure first, so I work on the path that's actually slowest.
 
+### 10. Timing rundown (everything in one place, with my real numbers)
+
+**The bell.** The chip has a clock that works like a bell. One bell to the next is one tick. Between two bells, a value leaves a register, runs through logic, and has to reach the next register. When the bell rings, whatever has arrived gets saved. If the work isn't done, a wrong number gets saved.
+
+**MHz and ns.** These describe the same bell: MHz is how often it rings, and ns is the time between rings. MHz means "million times per second", and a ns is one billionth of a second. To convert, ns = 1000 ÷ MHz. More MHz means more ticks per second, but less time for each one.
+
+| Speed | Time per tick |
+|---|---|
+| 50 MHz | 20 ns |
+| 100 MHz | 10 ns |
+| 200 MHz | 5 ns |
+
+**Tick vs step.** A tick does one small item, and a step is one full update of the worm, a to-do list of about 3,200 ticks.
+
+**The slowest tick sets the speed.** All ticks are the same length, so one slow tick slows down all of them.
+
+**The constraint is a note, not a control.** `create_clock -period 10` tells Vivado how often the bell rings, and Vivado checks whether everything fits. It doesn't change the real clock, which is a physical part on the board. If the `.xdc` said 20 ns but the real clock stayed at 100 MHz, the report would pass and the chip would still save wrong numbers, like planning for 20 minutes in an exam that ends at 10. To really run at 20 ns, I'd need a circuit that makes a 50 MHz clock, and then the note would be true.
+
+**Synthesis vs implementation.** Synthesis turns Verilog into chip parts and can only estimate timing. Implementation places and wires them, so that's the number that counts. Wires take time too. I don't need the board for this.
+
+**Reading the report.** WNS is the time left on the slowest path. Positive means it fits, negative means it's too slow. Mine was **−6.728 ns** at 100 MHz, with 1,346 of 7,666 endpoints failing. So my slowest path needs 10 + 6.7 = 16.7 ns, and my top speed is 1000 ÷ 16.7, or about **60 MHz** (~53 µs per step).
+
+**My slowest path.** All of this happens in one PIPES tick (`pipe_flow`, then the write into `totals`):
+
+```
+bell → read pipe_a/b → read voltages → subtract + multiply → add to totals → bell
+         3.87 ns          2.75 ns          5.59 ns             3.43 ns
+```
+
+That's 15.64 ns, plus 1.09 ns of fixed costs, for 16.73 ns in total. Wires are 41% of it, and the multiplier (the DSP) alone takes 5.07 ns.
+
+**How to go faster.** Time per step = ticks per step × time per tick. I can make ticks shorter (cut long work across more ticks, saving values in regs at each cut) or use fewer ticks (skip work I don't need). Every extra tick in PIPES gets paid 1,087 times per step, so splitting everything stops helping. The tick also can't get shorter than its slowest remaining piece. The last two rows are estimates:
+
+| Ticks per pipe | Ticks per step | Slowest tick | Time per step |
+|---|---|---|---|
+| 2 (now) | ~3,200 | 16.7 ns | ~53 µs |
+| 3 (my cut) | ~4,300 | 10–11 ns | ~43–48 µs |
+| 6 (every stage) | ~7,500 | 6–11 ns | ~45–83 µs |
+
+**Why it matters for the fly.** 10 ns is tiny, but it gets multiplied by the number of ticks. Rough numbers, assuming ~10 million links and 10–100% of neurons firing in a step:
+
+| | Worm | Fly (rough) |
+|---|---|---|
+| Ticks per step | ~3,200 | ~1–10 million |
+| Time per step at 10 ns | 32 µs | 10–100 ms |
+| Time per step at 20 ns | 64 µs | 20–200 ms |
+
+For the worm, a slower clock wouldn't matter: over 15,000 steps per second is plenty. For the fly, it decides whether a drone can react in time. The wiring also won't fit in BRAM (roughly 200 Mbit vs 4.9 Mbit), so it would live in slower DDR memory, and the fly will need to do lots of work per tick, not just run a faster clock.
+
+**The debugging loop.**
+1. Run implementation.
+2. Read WNS and the slowest path.
+3. Find the biggest chunk and decide where to cut it.
+4. Change the Verilog and run the tests.
+5. Repeat until I hit my target or the gains stop being worth it.
+
+**My plan for the next cut.** Three ticks per pipe: subtract on tick 1 (saving the difference and `pipe_size` in regs), then multiply and add to side a on tick 2, and to side b on tick 3. `pipe_size` has to be saved too, because reading it straight from BRAM on tick 2 would put the slow read back in that tick. After this, the next slowest path is probably the ~11 ns one from `link_receiver` or `pipe_a` BRAM → read `totals` → add → write `totals`.
+
 ## Mistakes fixed
 - None this time. All tests passed on the first run.
 
