@@ -190,18 +190,14 @@ module core #(
         
             end
             else begin
-                if(flipflop_pipe_flow == 0) begin
-                    pipe_flow_addition<=(voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]);
-                    flipflop_pipe_flow <= 1;
-                    pipe_size_to_reg <= pipe_size[neuron_index];
-                end
-                else begin 
+                
+               
                     totals[pipe_b[neuron_index]] <= totals[pipe_b[neuron_index]] + pipe_flow + totals_temp_val_holder_b;
                     flipflop_pipe_flow <= 0;
                     neuron_index <= neuron_index + 1;
                     flipflopper <= 0;
 
-                end
+                
             
 
             end
