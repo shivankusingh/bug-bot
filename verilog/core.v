@@ -76,11 +76,12 @@ module core #(
     reg [10:0] neuron_index; 
     wire signed [15:0] new_voltage;
     reg signed [15:0] new_voltage_reg;
+    reg signed [15:0] totals_reg;
     wire new_spike;
     reg new_spike_reg;
     lif_math neuron_math(
-        .old_voltage(voltages[neuron_index]),
-        .total(totals[neuron_index]),
+        .old_voltage(new_voltage_reg),
+        .total(totals_reg),
         .new_voltage(new_voltage),
         .spike(new_spike)
     );
@@ -150,6 +151,9 @@ module core #(
                     pipe_shift <= 10;
                     flipflopper <= 0;
                     flipflop_pipe_flow <= 0;
+                    totals_reg <= 0;
+                new_voltage_reg <= 0;
+                new_spike_reg <= 0;
                 end
                 else if (slot_spikes == start[neuron_index+1])begin
                     neuron_index <= neuron_index + 1;
@@ -175,6 +179,9 @@ module core #(
                 flipflopper <= 0;
                 flipflop_pipe_flow <= 0;
                 neuron_index_flipflop_update <= 0;
+                totals_reg <= 0;
+                new_voltage_reg <= 0;
+                new_spike_reg <= 0;
             end
             
             else begin
@@ -223,13 +230,15 @@ module core #(
             else begin
                 if (neuron_index_flipflop_update == 0) begin
                     neuron_index_flipflop_update <= 1;
-                    new_voltage_reg <= new_voltage;
-                    new_spike_reg <= new_spike;
+                    new_voltage_reg <= voltages[neuron_index];
+                    
+                    totals_reg <= totals[neuron_index];
+                    
                 end
                 else begin 
                     neuron_index_flipflop_update <= 0;
-                    voltages[neuron_index] <= new_voltage_reg;
-                spikes[neuron_index] <= new_spike_reg;
+                    voltages[neuron_index] <= new_voltage;
+spikes[neuron_index]<= new_spike;
                 neuron_index <= neuron_index + 1;
                 end
                 
