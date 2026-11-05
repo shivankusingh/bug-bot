@@ -47,8 +47,12 @@ module core #(
     reg [2:0] PIPE_K;
 
     reg [3:0] pipe_shift;
+    
     wire signed [19:0] pipe_flow;
+    reg signed [15:0] pipe_flow_addition;
     reg flipflopper;
+    reg flipflop_pipe_flow;
+    reg [7:0] pipe_size_to_reg;
     wire signed [15:0] totals_temp_val_holder_a;
     wire signed [15:0] totals_temp_val_holder_b;
     initial begin
@@ -71,7 +75,7 @@ module core #(
     reg [10:0] neuron_index; 
     wire signed [15:0] new_voltage;
     wire new_spike;
-
+    
     lif_math neuron_math(
         .old_voltage(voltages[neuron_index]),
         .total(totals[neuron_index]),
@@ -82,7 +86,7 @@ module core #(
         assign totals_temp_val_holder_b = (spikes[pipe_a[neuron_index]] ==1) ?  ( pipe_size[neuron_index] * PIPE_K) :  0;
        
         assign totals_temp_val_holder_a = (spikes[pipe_b[neuron_index]] ==1) ?  ( pipe_size[neuron_index] * PIPE_K) : 0;
-        assign pipe_flow  =(((voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]) * $signed({1'b0,pipe_size[neuron_index]})) >>> pipe_shift);
+        assign pipe_flow  =((pipe_flow_addition* $signed({1'b0,pipe_size_to_reg})) >>> pipe_shift);
 
     always @(posedge clk) begin
         
@@ -143,6 +147,7 @@ module core #(
                     PIPE_K <= 1;
                     pipe_shift <= 10;
                     flipflopper <= 0;
+                    flipflop_pipe_flow <= 0;
                 end
                 else if (slot_spikes == start[neuron_index+1])begin
                     neuron_index <= neuron_index + 1;
@@ -166,18 +171,38 @@ module core #(
                 state <= UPDATE;
                 neuron_index <= 0;
                 flipflopper <= 0;
+                flipflop_pipe_flow <= 0;
             end
             
             else begin
 
             if (flipflopper == 0) begin
-            totals[pipe_a[neuron_index]] <= totals[pipe_a[neuron_index]] - pipe_flow + totals_temp_val_holder_a;
-            flipflopper <= 1;
+                if (flipflop_pipe_flow == 0) begin
+                    pipe_flow_addition<=(voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]);
+                    flipflop_pipe_flow <= 1;
+                    pipe_size_to_reg <= pipe_size[neuron_index];
+                end
+                else begin 
+                    totals[pipe_a[neuron_index]] <= totals[pipe_a[neuron_index]] - pipe_flow + totals_temp_val_holder_a;
+                    flipflop_pipe_flow <= 0;
+                    flipflopper <= 1;
+                end
+        
             end
             else begin
-            totals[pipe_b[neuron_index]] <= totals[pipe_b[neuron_index]] + pipe_flow + totals_temp_val_holder_b;
-            flipflopper <= 0;
-                        neuron_index <= neuron_index + 1;
+                if(flipflop_pipe_flow == 0) begin
+                    pipe_flow_addition<=(voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]);
+                    flipflop_pipe_flow <= 1;
+                    pipe_size_to_reg <= pipe_size[neuron_index];
+                end
+                else begin 
+                    totals[pipe_b[neuron_index]] <= totals[pipe_b[neuron_index]] + pipe_flow + totals_temp_val_holder_b;
+                    flipflop_pipe_flow <= 0;
+                    neuron_index <= neuron_index + 1;
+                    flipflopper <= 0;
+
+                end
+            
 
             end
 
