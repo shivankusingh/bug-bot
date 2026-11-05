@@ -48,7 +48,7 @@ module core #(
 
     reg [3:0] pipe_shift;
     wire signed [19:0] pipe_flow;
-
+    reg flipflopper;
     wire signed [15:0] totals_temp_val_holder_a;
     wire signed [15:0] totals_temp_val_holder_b;
     initial begin
@@ -142,7 +142,7 @@ module core #(
                     slot_spikes <= 0;
                     PIPE_K <= 1;
                     pipe_shift <= 10;
-              
+                    flipflopper <= 0;
                 end
                 else if (slot_spikes == start[neuron_index+1])begin
                     neuron_index <= neuron_index + 1;
@@ -165,16 +165,22 @@ module core #(
             if (neuron_index == N_PIPES) begin
                 state <= UPDATE;
                 neuron_index <= 0;
-
+                flipflopper <= 0;
             end
             
             else begin
 
-
+            if (flipflopper == 0) begin
             totals[pipe_a[neuron_index]] <= totals[pipe_a[neuron_index]] - pipe_flow + totals_temp_val_holder_a;
+            flipflopper <= 1;
+            end
+            else begin
             totals[pipe_b[neuron_index]] <= totals[pipe_b[neuron_index]] + pipe_flow + totals_temp_val_holder_b;
+            flipflopper <= 0;
+                        neuron_index <= neuron_index + 1;
 
-            neuron_index <= neuron_index + 1;
+            end
+
             
             end
             
