@@ -77,6 +77,10 @@ module core #(
     wire signed [15:0] new_voltage;
     reg signed [15:0] new_voltage_reg;
     reg signed [15:0] totals_reg;
+
+    reg [8:0] pipe_a_neuron_index_reg;
+    reg [8:0] pipe_b_neuron_index_reg;
+
     wire new_spike;
     reg new_spike_reg;
     lif_math neuron_math(
@@ -86,9 +90,9 @@ module core #(
         .spike(new_spike)
     );
         
-        assign totals_temp_val_holder_b = (spikes[pipe_a[neuron_index]] ==1) ?  ( pipe_size[neuron_index] * PIPE_K) :  0;
+        assign totals_temp_val_holder_b = (spikes[pipe_a_neuron_index_reg] ==1) ?  ( pipe_size_to_reg * PIPE_K) :  0;
        
-        assign totals_temp_val_holder_a = (spikes[pipe_b[neuron_index]] ==1) ?  ( pipe_size[neuron_index] * PIPE_K) : 0;
+        assign totals_temp_val_holder_a = (spikes[pipe_b_neuron_index_reg] ==1) ?  ( pipe_size_to_reg * PIPE_K) : 0;
         assign pipe_flow  =((pipe_flow_addition* $signed({1'b0,pipe_size_to_reg})) >>> pipe_shift);
 
     always @(posedge clk) begin
@@ -190,7 +194,10 @@ module core #(
                 if (flipflop_pipe_flow == 0) begin
                     pipe_flow_addition<=(voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]);
                     flipflop_pipe_flow <= 1;
+                    
                     pipe_size_to_reg <= pipe_size[neuron_index];
+                    pipe_a_neuron_index_reg <= pipe_a[neuron_index];
+                    pipe_b_neuron_index_reg <= pipe_b[neuron_index];
                 end
                 else begin 
                     totals[pipe_a[neuron_index]] <= totals[pipe_a[neuron_index]] - pipe_flow + totals_temp_val_holder_a;
