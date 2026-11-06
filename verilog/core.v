@@ -38,10 +38,13 @@ module core #(
                CLEAR = 1,
                POKES = 2,
                SPIKES = 3,
-               PIPES = 4,
-               UPDATE = 5;
+               PIPES_SAVE = 4,
+               PIPES_A = 5,
+               PIPES_B = 6,
+               UPDATE_READ = 7,
+               UPDATE_SAVE = 8;
                
-    reg [2:0] state;
+    reg [3:0] state;
     
     reg [7:0] poke_index;
     reg [2:0] PIPE_K;
@@ -50,9 +53,6 @@ module core #(
     
     wire signed [19:0] pipe_flow;
     reg signed [15:0] pipe_flow_addition;
-    reg flipflopper;
-    reg flipflop_pipe_flow;
-    reg neuron_index_flipflop_update;
     reg [7:0] pipe_size_to_reg;
     wire signed [15:0] totals_temp_val_holder_a;
     wire signed [15:0] totals_temp_val_holder_b;
@@ -75,16 +75,15 @@ module core #(
 
     reg [10:0] neuron_index; 
     wire signed [15:0] new_voltage;
-    reg signed [15:0] new_voltage_reg;
+    reg signed [15:0] old_voltage_reg;
     reg signed [15:0] totals_reg;
 
     reg [8:0] pipe_a_neuron_index_reg;
     reg [8:0] pipe_b_neuron_index_reg;
 
     wire new_spike;
-    reg new_spike_reg;
     lif_math neuron_math(
-        .old_voltage(new_voltage_reg),
+        .old_voltage(old_voltage_reg),
         .total(totals_reg),
         .new_voltage(new_voltage),
         .spike(new_spike)
@@ -148,16 +147,13 @@ module core #(
         else if (state == SPIKES) begin
 
                 if (neuron_index == N) begin
-                    state <= PIPES;
+                    state <= PIPES_SAVE;
                     neuron_index <= 0;
                     slot_spikes <= 0;
                     PIPE_K <= 1;
                     pipe_shift <= 10;
-                    flipflopper <= 0;
-                    flipflop_pipe_flow <= 0;
                     totals_reg <= 0;
-                new_voltage_reg <= 0;
-                new_spike_reg <= 0;
+                old_voltage_reg <= 0;
                 end
                 else if (slot_spikes == start[neuron_index+1])begin
                     neuron_index <= neuron_index + 1;
@@ -176,80 +172,59 @@ module core #(
         end
 
 
-        else if (state == PIPES) begin
+        // PIPES takes three ticks per pipe, so totals gets one write per tick.
+        // Tick 1: save everything this pipe needs into regs.
+        else if (state == PIPES_SAVE) begin
             if (neuron_index == N_PIPES) begin
-                state <= UPDATE;
+                state <= UPDATE_READ;
                 neuron_index <= 0;
-                flipflopper <= 0;
-                flipflop_pipe_flow <= 0;
-                neuron_index_flipflop_update <= 0;
                 totals_reg <= 0;
-                new_voltage_reg <= 0;
-                new_spike_reg <= 0;
-            end
-            
-            else begin
-
-            if (flipflopper == 0) begin
-                if (flipflop_pipe_flow == 0) begin
-                    pipe_flow_addition<=(voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]]);
-                    flipflop_pipe_flow <= 1;
-                    
-                    pipe_size_to_reg <= pipe_size[neuron_index];
-                    pipe_a_neuron_index_reg <= pipe_a[neuron_index];
-                    pipe_b_neuron_index_reg <= pipe_b[neuron_index];
-                end
-                else begin 
-                    totals[pipe_a_neuron_index_reg] <= totals[pipe_a_neuron_index_reg] - pipe_flow + totals_temp_val_holder_a;
-                    flipflop_pipe_flow <= 0;
-                    flipflopper <= 1;
-                end
-        
+                old_voltage_reg <= 0;
             end
             else begin
-                
-               
-                    totals[pipe_b_neuron_index_reg] <= totals[pipe_b_neuron_index_reg] + pipe_flow + totals_temp_val_holder_b;
-                    flipflop_pipe_flow <= 0;
-                    neuron_index <= neuron_index + 1;
-                    flipflopper <= 0;
-
-                
-            
-
+                state <= PIPES_A;
+                pipe_flow_addition <= voltages[pipe_a[neuron_index]] - voltages[pipe_b[neuron_index]];
+                pipe_size_to_reg <= pipe_size[neuron_index];
+                pipe_a_neuron_index_reg <= pipe_a[neuron_index];
+                pipe_b_neuron_index_reg <= pipe_b[neuron_index];
             end
+        end
 
-            
-            end
-            
+        // Tick 2: write side a.
+        else if (state == PIPES_A) begin
+            state <= PIPES_B;
+            totals[pipe_a_neuron_index_reg] <= totals[pipe_a_neuron_index_reg] - pipe_flow + totals_temp_val_holder_a;
+        end
 
-            
+        // Tick 3: write side b, then move to the next pipe.
+        else if (state == PIPES_B) begin
+            state <= PIPES_SAVE;
+            totals[pipe_b_neuron_index_reg] <= totals[pipe_b_neuron_index_reg] + pipe_flow + totals_temp_val_holder_b;
+            neuron_index <= neuron_index + 1;
         end
 
 
-        else if (state == UPDATE) begin
+        // UPDATE takes two ticks per neuron.
+        // Tick 1: read the neuron into the regs that feed lif_math.
+        else if (state == UPDATE_READ) begin
             if (neuron_index == N) begin
                 state <= IDLE;
                 busy <= 0;
                 neuron_index <= 0;
-                neuron_index_flipflop_update <= 0;
             end
             else begin
-                if (neuron_index_flipflop_update == 0) begin
-                    neuron_index_flipflop_update <= 1;
-                    new_voltage_reg <= voltages[neuron_index];
-                    
-                    totals_reg <= totals[neuron_index];
-                    
-                end
-                else begin 
-                    neuron_index_flipflop_update <= 0;
-                    voltages[neuron_index] <= new_voltage;
-spikes[neuron_index]<= new_spike;
-                neuron_index <= neuron_index + 1;
-                end
-                
+                state <= UPDATE_SAVE;
+                old_voltage_reg <= voltages[neuron_index];
+                totals_reg <= totals[neuron_index];
             end
+        end
+
+        // Tick 2: lif_math's answer is ready, so save it and move to the next neuron.
+        else if (state == UPDATE_SAVE) begin
+            state <= UPDATE_READ;
+            voltages[neuron_index] <= new_voltage;
+            spikes[neuron_index] <= new_spike;
+            neuron_index <= neuron_index + 1;
         end
         
     end
