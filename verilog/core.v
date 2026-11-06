@@ -200,7 +200,7 @@ module core #(
                     pipe_b_neuron_index_reg <= pipe_b[neuron_index];
                 end
                 else begin 
-                    totals[pipe_a[neuron_index]] <= totals[pipe_a[neuron_index]] - pipe_flow + totals_temp_val_holder_a;
+                    totals[pipe_a_neuron_index_reg] <= totals[pipe_a_neuron_index_reg] - pipe_flow + totals_temp_val_holder_a;
                     flipflop_pipe_flow <= 0;
                     flipflopper <= 1;
                 end
@@ -209,7 +209,7 @@ module core #(
             else begin
                 
                
-                    totals[pipe_b[neuron_index]] <= totals[pipe_b[neuron_index]] + pipe_flow + totals_temp_val_holder_b;
+                    totals[pipe_b_neuron_index_reg] <= totals[pipe_b_neuron_index_reg] + pipe_flow + totals_temp_val_holder_b;
                     flipflop_pipe_flow <= 0;
                     neuron_index <= neuron_index + 1;
                     flipflopper <= 0;
