@@ -21,6 +21,8 @@ and the pipes as a plain flat list (no CSR: every pipe is used every step), one 
     pipe_a.mem          one end of the pipe (neuron number)
     pipe_b.mem          the other end
     pipe_size.mem       raw size, 1 to 250 (unsigned)
+and one line per neuron saying whether it's a motor, for the muscle readout:
+    motor_role.mem      0 = not a motor, 1 = backward motor (DA/VA), 2 = forward motor (DB/VB)
 A network with no pipes (the chain) gets one do-nothing pipe, A-B with size 0, because a
 Verilog memory can't have 0 slots. Size 0 means no flow and no spike package.
 All numbers are hex, one per line, line k = slot k.
@@ -53,7 +55,7 @@ def _write(path, numbers, width=None):
     path.write_text("".join(line + "\n" for line in lines))
 
 
-def write_mem(connections, poke_connections, folder, pipes=()):
+def write_mem(connections, poke_connections, folder, pipes=(), motors=((), ())):
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     for prefix, lists in (("link", connections), ("poke", poke_connections)):
@@ -75,6 +77,14 @@ def write_mem(connections, poke_connections, folder, pipes=()):
     _write(folder / "pipe_b.mem", [b for _, b, _ in pipes])
     _write(folder / "pipe_size.mem", [size for _, _, size in pipes])
     print(f"  pipes: {len(pipes)} slots, sizes {min(s for *_, s in pipes)} to {max(s for *_, s in pipes)}")
+    back_motors, forward_motors = motors
+    roles = [0] * len(connections)
+    for i in back_motors:
+        roles[i] = 1
+    for i in forward_motors:
+        roles[i] = 2
+    _write(folder / "motor_role.mem", roles)
+    print(f"  motors: {len(back_motors)} backward, {len(forward_motors)} forward")
     # print only the folder name, so nothing personal ends up in notebook outputs
     print(f"Wrote {folder.parent.name}/{folder.name}/ for {len(connections)} neurons")
 
@@ -107,6 +117,16 @@ def full_pipes():
     return net.pipes
 
 
+def chain_motors():
+    return [], []                               # the 4-neuron network has no motors
+
+
+def full_motors():
+    """(back_motors, forward_motors) for the 300-neuron worm, as neuron numbers."""
+    import connectome_all as net
+    return net.back_motors, net.forward_motors
+
+
 if __name__ == "__main__":
-    write_mem(*chain_network(), MEM / "chain", chain_pipes())
-    write_mem(*full_network(), MEM / "full", full_pipes())
+    write_mem(*chain_network(), MEM / "chain", chain_pipes(), chain_motors())
+    write_mem(*full_network(), MEM / "full", full_pipes(), full_motors())

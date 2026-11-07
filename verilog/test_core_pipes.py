@@ -167,7 +167,7 @@ if __name__ == "__main__":
             "N_PIPES": max(1, len(PIPE_LISTS[network]())),
             "MEM_DIR": f'"../data/mem/{network}"',  # relative to verilog/, where the test runs
         }
-        runner.build(sources=[HERE / "core.v", HERE / "lif_math.v"], hdl_toplevel="core",
+        runner.build(sources=[HERE / "core.v", HERE / "lif_math.v", *HERE.glob("muscle_readout.v")], hdl_toplevel="core",
                      parameters=parameters, build_dir=HERE / "sim_build" / network,
                      timescale=("1ns", "1ps"), always=True)
         runner.test(hdl_toplevel="core", test_module="test_core_pipes", test_dir=HERE,

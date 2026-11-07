@@ -134,7 +134,7 @@ if __name__ == "__main__":
         "MEM_DIR": f'"../data/mem/{network}"',  # relative to verilog/, where the test runs
     }
     runner = get_runner("icarus")
-    runner.build(sources=[HERE / "core.v", HERE / "lif_math.v"], hdl_toplevel="core",
+    runner.build(sources=[HERE / "core.v", HERE / "lif_math.v", *HERE.glob("muscle_readout.v")], hdl_toplevel="core",
                  parameters=parameters, build_dir=HERE / "sim_build" / network,
                  timescale=("1ns", "1ps"), always=True)
     runner.test(hdl_toplevel="core", test_module="test_core_golden", test_dir=HERE,
