@@ -824,3 +824,55 @@ Two extra ticks per step, on top of ~4,600.
 1. Vivado (Windows): `git pull`, `reset_run synth_1`, then implementation, to check the new states didn't make timing worse (WNS −0.93 ns at 100 MHz).
 2. Close 100 MHz timing (worst path: SPIKES `start` lookup → `totals`).
 3. Basys 3 top file: connect `wheel_direction` and `wheel_speed` to pins (maybe the buckets to LEDs), and touch inputs to pokes.
+
+# bug-bot log: Nov 8–9, 2026 (later): Vivado run 8, blinky, and the board top file
+
+## Summary
+Checked the muscle readout in Vivado (run 8), got a first board test (blinky) ready, and wrote the top file that connects the worm core to the Basys 3's buttons and LEDs. `test_top` passes all 80 steps in simulation. The board itself isn't working yet: Windows doesn't see its USB data link, most likely because of the cable.
+
+## What I did
+- **Vivado run 8** (Basys 3, with the muscle readout):
+
+| | Run 7 | Run 8 |
+|---|---|---|
+| WNS | −0.93 ns | −0.74 ns (~93 MHz max) |
+| Failing endpoints | 366 | 244 |
+| Worst path | SPIKES `start` lookup → `totals` | same |
+| LUTs | 1,571 | 1,602 |
+| Flip-flops | 156 | 172 |
+| Pins | 6 | 29 |
+
+  The muscle states didn't make a new worst path. The small WNS gain is probably placement luck, since that path didn't change. Open puzzle: the new regs are 23 bits, but only 16 flip-flops were added.
+- **Blinky** (`verilog/blinky.v`, `blinky.xdc`): LED 0 blinks once per second, LED 1 follows the center button. Simulated with the half second shrunk to 4 ticks and looked at it in Surfer. Built the bitstream on Windows.
+- **Board connection failed:** Hardware Manager only showed `localhost`, and Device Manager showed no "USB Serial Converter A/B". The board only powers on sometimes. Since the board gets its power over the same cable, power working but data not points to a charge-only or broken cable (power uses the outer wires, data the middle two).
+- **Top file** (`verilog/top.v`), simulated by `verilog/test_top.py`:
+  1. Button sync: each button goes through two flip-flops before use.
+  2. Step timer: counts to `STEP_TICKS`, then `start_step` is 1 for exactly one tick. `heartbeat` flips each step so I can see the timer on an LED.
+  3. `core` inside `top`, with `pokes = {tail, head}`.
+  4. LEDs: 15 backward, 14 forward, 13 heartbeat, 12/11 head/tail button, 6–0 wheel speed in binary.
+- **`board.v` + `board.xdc`**: makes 50 MHz from the board's 100 MHz with Vivado's Clocking Wizard (`clk_wiz_0`) and holds `top` in reset until that clock is steady (`btnC | ~locked`). Vivado only, not built yet.
+- `test_top` holds the head/tail buttons like `full_inputs.txt`, checks the LEDs every step against the Python rules, and fails if `start_step` ever comes while the core is `busy`. Passes all 80 steps in ~8 s.
+
+## Decisions
+- **Run the board at 50 MHz** instead of closing 100 MHz timing first. The core needs ~10.7 ns per tick, and 50 MHz gives 20 ns. 100 MHz timing becomes "nice to have later".
+- **One clock for everything** in `top` (timer, buttons, core). A 1-tick pulse on a 100 MHz clock could fall between two 50 MHz edges and get missed.
+- **`STEP_TICKS = 5,000,000`** (0.1 s at 50 MHz, 10 steps/s), so the backward response lasts ~2.5 s and I can watch it. The minimum is the longest possible step, ~8,200 ticks if every neuron fired. Too small, and steps get skipped with no error, because the core only listens for `start_step` in IDLE.
+- **No debouncing:** a few ms of button flicker doesn't matter when steps are 100 ms apart.
+- **Separate Vivado projects:** `bug-bot-synth` (core only, for timing work), `blinky`, and `bug-bot-board`.
+
+## What I learned
+1. **Simulate first, then the board.** On the board I can only see LEDs. In simulation I can see every signal. The cable only blocks the last step.
+2. **Reading waveforms:** a waveform is a table turned sideways. Click a moment, then read the value column next to the names. Multi-bit signals show as a number (`led [1:0] = 3` means both on). Come with one question instead of reading everything.
+3. **A reg holds its value until assigned.** Blinky's LED depends on how many times the counter has wrapped, not on the counter's current value.
+4. **The clock never slows down.** The timer decides when a step starts, and the core waits in IDLE the rest of the time (~4,500 ticks of work, then ~4,995,000 of waiting).
+5. **Buttons aren't in sync with the clock**, so they go through two flip-flops first (2 ticks of delay).
+6. **Debug LEDs:** a 1-tick pulse is invisible to a human, so `heartbeat` holds for a whole step. Each LED answers one question when the board does nothing.
+
+## Mistakes fixed
+- None in the RTL this time. Board trouble was the USB cable, not the design.
+
+## Next steps
+1. Vivado project `bug-bot-board` (`core.v`, `lif_math.v`, `top.v`, `board.v`, `board.xdc`, Clocking Wizard at 50 MHz): build the bitstream and check timing passes at 50 MHz.
+2. Get a data micro-USB cable, then program blinky, then the worm: hold the up button ~1 s and LED 15 should light for ~2.5 s.
+3. Optional: follow one head press in Surfer (`verilog/sim_build/top/top.fst`).
+4. Later: 100 MHz timing, the robot (motors instead of LEDs), then learning (R-STDP).
