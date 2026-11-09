@@ -18,7 +18,12 @@ skipped without any error on the board).
 
 Waveform: saved as verilog/sim_build/top/top.fst; open it with
     surfer verilog/sim_build/top/top.fst
+
+Website: when the test passes it writes docs/board.json (the 16 LEDs after each step, and how many
+clock ticks each step took), which the board panel on the demo site plays back. Rerun this test
+whenever core.v or top.v changes.
 """
+import json
 import sys
 from pathlib import Path
 
@@ -46,11 +51,13 @@ async def watch_for_skipped_steps(dut, skipped):
 
 
 async def wait_for(dut, signal, value, limit, what):
+    """Wait until signal == value; returns how many ticks that took."""
     ticks = 0
     while int(signal.value) != value:
         await FallingEdge(dut.clk)
         ticks += 1
         assert ticks <= limit, f"waited {limit} ticks for {what}"
+    return ticks
 
 
 @cocotb.test()
@@ -70,15 +77,18 @@ async def board_run_matches_python(dut):
 
     skipped = []
     cocotb.start_soon(watch_for_skipped_steps(dut, skipped))
+    leds, step_ticks = [], []
 
     for step, x in enumerate(inputs):
         head, tail = (x >> 1) & 1, x & 1
         dut.btnU.value = head          # "hold" the buttons for this step
         dut.btnD.value = tail
         await wait_for(dut, dut.worm.busy, 1, 2 * STEP_TICKS, f"step {step} to start")
-        await wait_for(dut, dut.worm.busy, 0, STEP_TICKS, f"step {step} to finish")
+        busy_ticks = await wait_for(dut, dut.worm.busy, 0, STEP_TICKS, f"step {step} to finish")
 
         led = int(dut.led.value)
+        leds.append(led)
+        step_ticks.append(busy_ticks)
         got = {"backward": (led >> 15) & 1, "forward": (led >> 14) & 1, "speed": led & 0x7F,
                "head": (led >> 12) & 1, "tail": (led >> 11) & 1}
         back, forward, direction, speed = want[step]
@@ -91,6 +101,17 @@ async def board_run_matches_python(dut):
 
     assert not skipped, f"start_step arrived while busy (a skipped step) at ticks {skipped[:5]}"
     dut._log.info(f"PASS: the LEDs match Python for all {len(inputs)} steps, no skipped steps")
+
+    # for the website's board panel (only written once everything above passed)
+    board = {
+        "about": "LEDs of the chip design (top.v + core.v) after each step of the 80-step head + tail "
+                 "run, from an Icarus Verilog simulation (verilog/test_top.py). Not the physical board.",
+        "clock_hz": 50_000_000,
+        "led": leds,            # bit i = led[i]
+        "ticks": step_ticks,    # clock ticks the core was busy for that step
+    }
+    (HERE.parent / "docs" / "board.json").write_text(json.dumps(board, separators=(",", ":")) + "\n")
+    dut._log.info(f"wrote docs/board.json (steps took {min(step_ticks)}-{max(step_ticks)} ticks)")
 
 
 if __name__ == "__main__":

@@ -97,6 +97,47 @@ h1 {
 .robot-label { display: flex; justify-content: space-between; font-family: var(--font-mono); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; margin-top: 4px; }
 .robot-label .speed { color: var(--muted); font-variant-numeric: tabular-nums; }
 
+/* chip panel: the FPGA board's 16 LEDs and 3 buttons, played back from the Verilog simulation */
+.rig { display: flex; align-items: stretch; justify-content: flex-end; gap: 12px; flex-wrap: wrap; }
+.board {
+  width: 404px; padding: 12px 14px 10px;
+  display: flex; flex-direction: column; justify-content: space-between;
+  background: color-mix(in srgb, var(--bg-raised) 82%, transparent);
+  border: 1px solid var(--line); border-radius: 6px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  font-family: var(--font-mono);
+}
+.board-head { display: flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.board-head .die { width: 14px; height: 14px; flex: none; color: color-mix(in srgb, var(--fg) 55%, transparent); }
+.board-head .ticks { margin-left: auto; letter-spacing: .02em; text-transform: none; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.board-body { display: flex; align-items: center; gap: 14px; margin-top: 14px; }
+.led-bank { flex: 1; min-width: 0; }
+.leds, .led-names {
+  display: grid; justify-items: center;
+  grid-template-columns: repeat(5, minmax(0, 1fr)) 6px repeat(4, minmax(0, 1fr)) 6px repeat(7, minmax(0, 1fr));
+}
+.led {
+  width: 9px; height: 9px; border-radius: 50%; display: block;
+  background: #0b0d1a; border: 1px solid #262b45;
+  transition: background .12s, box-shadow .12s, border-color .12s;
+}
+.led.on { background: var(--c); border-color: var(--c); box-shadow: 0 0 9px var(--c), 0 0 2px var(--c); }
+.led-names { margin-top: 6px; font-size: 8px; letter-spacing: -.02em; color: var(--muted); }
+.led-names span { white-space: nowrap; }
+.board-read { margin-top: 10px; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-variant-numeric: tabular-nums; }
+.board-read b { font-weight: 500; }
+.pad { display: grid; grid-template-columns: 22px auto; grid-auto-rows: 22px; gap: 4px 7px; align-items: center; }
+.pbtn {
+  width: 22px; height: 22px; padding: 0; border-radius: 50%; cursor: pointer;
+  display: grid; place-items: center; font-size: 8px; line-height: 1; color: var(--muted);
+  border: 1px solid #2a2f4a; background: radial-gradient(circle at 35% 30%, #1d2038, #0b0d1a 70%);
+  transition: border-color .15s, box-shadow .15s, color .15s;
+}
+.pbtn:hover { border-color: var(--muted); color: var(--fg); }
+.pbtn.up.held { border-color: var(--cyan); color: var(--cyan); box-shadow: 0 0 14px -3px var(--cyan); }
+.pbtn.down.held { border-color: var(--magenta); color: var(--magenta); box-shadow: 0 0 14px -3px var(--magenta); }
+.pad .lbl { font-size: 9px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+
 .controls {
   display: flex; align-items: center; gap: 10px 16px; flex-wrap: wrap;
   padding: 12px 14px;
@@ -185,6 +226,14 @@ footer .wrap { border-top: 1px solid var(--line); padding-top: 28px; display: gr
   .legend .hint { display: none; }
   .legend { grid-auto-flow: column; gap: 14px; }
   .robot { width: 200px; }
+  /* phones: the robot sits beside the phase text, the chip panel spans the row below */
+  .status-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "phase robot" "board board"; align-items: end; gap: 12px; }
+  .phase { grid-area: phase; }
+  .rig { display: contents; }
+  .robot { grid-area: robot; }
+  .board { grid-area: board; width: auto; }
+  .pad { grid-template-columns: 22px; }
+  .pad .lbl { display: none; }
   section.story { grid-template-columns: minmax(0, 1fr); padding-block: 64px 8px; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   footer .wrap { grid-template-columns: minmax(0, 1fr); }
@@ -227,6 +276,26 @@ img { max-width: 100%; }
     <div class="bottom">
       <div class="status-row">
         <div class="phase" id="phase" aria-live="polite">Demo · <strong>poking the head</strong></div>
+        <div class="rig">
+        <div class="board interactive" id="board" role="group" aria-label="FPGA board: the chip design's LEDs, played back from a Verilog simulation" hidden>
+          <div class="board-head">
+            <svg class="die" viewBox="0 0 14 14" aria-hidden="true"><rect x="3.5" y="3.5" width="7" height="7" rx="1" fill="none" stroke="currentColor"/><path d="M5.5 1v2.5M8.5 1v2.5M5.5 10.5V13M8.5 10.5V13M1 5.5h2.5M1 8.5h2.5M10.5 5.5H13M10.5 8.5H13" stroke="currentColor"/></svg>
+            <span>FPGA · simulated</span>
+            <span class="ticks" id="boardTicks"></span>
+          </div>
+          <div class="board-body">
+            <div class="led-bank">
+              <div class="leds" id="leds" aria-hidden="true"></div>
+              <div class="led-names" id="ledNames" aria-hidden="true"></div>
+              <div class="board-read" id="boardRead"></div>
+            </div>
+            <div class="pad">
+              <button class="pbtn up" id="btnUp" type="button" aria-label="Up button: poke the head">▲</button><span class="lbl">head</span>
+              <button class="pbtn" id="btnRst" type="button" aria-label="Center button: reset and restart the demo">●</button><span class="lbl">reset</span>
+              <button class="pbtn down" id="btnDown" type="button" aria-label="Down button: poke the tail">▼</button><span class="lbl">tail</span>
+            </div>
+          </div>
+        </div>
         <div class="robot interactive" aria-label="Robot wheels">
           <svg viewBox="0 0 220 104" role="img" aria-label="Robot driven by the worm's motor neurons">
             <line id="ground" x1="0" y1="98" x2="220" y2="98" stroke="#2a2f4a" stroke-width="2" stroke-dasharray="10 8"></line>
@@ -240,6 +309,7 @@ img { max-width: 100%; }
             <g id="wheelR"><circle cx="148" cy="84" r="13" fill="#010104" stroke="#e7eaf6" stroke-width="1.5"></circle><path d="M148 73 V95 M137 84 H159" stroke="#e7eaf6" stroke-opacity=".6" stroke-width="1.5"></path></g>
           </svg>
           <div class="robot-label"><span id="dirLabel">Stopped</span><span class="speed" id="speedLabel">speed 0</span></div>
+        </div>
         </div>
       </div>
       <div class="controls interactive">
@@ -299,12 +369,14 @@ img { max-width: 100%; }
       </div>
       <div class="prose">
         <p>The model only uses integer math and bit shifts, and every voltage stays between −512 and 255, so it maps straight onto hardware. The Python version is the reference: its output is saved as golden files, and the Verilog version has to match them bit for bit.</p>
-        <p>Next is a time-multiplexed core: one neuron circuit that loops over all 300 neurons, with the wiring stored in on-chip memory. The whole brain needs about 110,000 bits, which fits in a small FPGA.</p>
+        <p>The chip design is time-multiplexed: one neuron circuit loops over all 300 neurons, with the wiring stored in on-chip memory. In simulation it matches the Python model bit for bit, every voltage and every spike, and it fits on a Digilent Basys 3 board using about 8% of the chip. A step takes about 4,500 clock ticks, around 90 µs at 50 MHz.</p>
+        <p>The board panel at the top plays back that chip design: buttons as touches, LEDs as the wheels, from a simulation of the Verilog. Running it on the physical board is next.</p>
         <ul class="road">
           <li><span class="chip done">done</span>Python model with the real connectome</li>
           <li><span class="chip done">done</span>Touch → decision → motors → wheels, both directions</li>
-          <li><span class="chip done">done</span>4-neuron network in Verilog, verified bit-exact</li>
-          <li><span class="chip next">next</span>Full 300-neuron core on an FPGA</li>
+          <li><span class="chip done">done</span>Full 300-neuron core in Verilog, verified bit-exact</li>
+          <li><span class="chip done">done</span>Wheel readout and board design (buttons, LEDs), verified in simulation</li>
+          <li><span class="chip next">next</span>Running on the physical FPGA board</li>
           <li><span class="chip">later</span>The robot: real sensors and motors</li>
         </ul>
       </div>
@@ -349,6 +421,8 @@ const COLORS = ['#c9d1ff', '#2de2e6', '#ff3ea5'].map((c) => new THREE.Color(c));
 const MAX_SPARKS = 6000;
 
 async function main() {
+  // the chip panel's data is optional: without it the panel just stays hidden
+  const boardReq = fetch('board.json').then((r) => (r.ok ? r.json() : null)).catch(() => null);
   let data;
   try {
     data = await (await fetch('run.json')).json();
@@ -370,6 +444,7 @@ async function main() {
   const run = data.run, STEPS = run.fired.length;
   const links = data.links, L = links.length;
   const firedSets = run.fired.map((list) => new Set(list));
+  const chipRun = await boardReq;   // waited for here, before any button can be clicked
 
   // ---------- scene ----------
   renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -549,6 +624,7 @@ async function main() {
     dirLabel.textContent = dir === 'backward' ? 'Backing up' : dir === 'forward' ? 'Driving forward' : 'Stopped';
     dirLabel.style.color = dir === 'backward' ? 'var(--cyan)' : dir === 'forward' ? 'var(--magenta)' : 'var(--muted)';
     speedLabel.textContent = `speed ${spd}`;
+    updateBoard(s);
   }
   $('pokeHead').addEventListener('click', () => startRange(0, Math.min(40, STEPS)));
   $('pokeTail').addEventListener('click', () => startRange(Math.min(40, STEPS - 1), STEPS));
@@ -590,6 +666,69 @@ async function main() {
     const v = robot.vel / 40;
     brainLed.setAttribute('fill', v < -0.05 ? mixHex('#c9d1ff', '#2de2e6', -v * 2) : v > 0.05 ? mixHex('#c9d1ff', '#ff3ea5', v * 2) : '#c9d1ff');
   }
+
+  // ---------- chip panel ----------
+  // board.json holds the 16 LEDs after each step, from a simulation of the Verilog design
+  // (verilog/test_top.py), so this shows what the chip does, not the Python model.
+  const chip = chipRun && Array.isArray(chipRun.led) && chipRun.led.length === STEPS ? chipRun : null;
+  const boardEl = $('board'), ledsEl = $('leds'), ledNames = $('ledNames');
+  const boardTicks = $('boardTicks'), boardRead = $('boardRead');
+  const btnUp = $('btnUp'), btnDown = $('btnDown'), btnRst = $('btnRst');
+  const LED_INFO = {
+    15: ['BCK', 'backward', 'var(--cyan)'],
+    14: ['FWD', 'forward', 'var(--magenta)'],
+    13: ['STP', 'flips every step', 'var(--neuron)'],
+    12: ['HD', 'head button held', 'var(--cyan)'],
+    11: ['TL', 'tail button held', 'var(--magenta)'],
+  };
+  const ledEls = [];
+  if (chip) {
+    for (let bit = 15; bit >= 0; bit--) {
+      if (bit === 10 || bit === 6) {   // small gaps between the LED groups
+        ledsEl.append(document.createElement('span'));
+        ledNames.append(document.createElement('span'));
+      }
+      const info = LED_INFO[bit];
+      const led = document.createElement('i');
+      led.className = 'led';
+      led.title = `led[${bit}]: ` + (info ? info[1] : bit <= 6 ? `wheel speed, worth ${1 << bit}` : 'not used');
+      ledEls[bit] = led;
+      ledsEl.append(led);
+      const name = document.createElement('span');
+      name.textContent = info ? info[0] : bit <= 6 ? String(1 << bit) : '·';
+      ledNames.append(name);
+    }
+    boardEl.title = chip.about;
+    boardEl.hidden = false;
+  }
+  function updateBoard(s) {
+    if (!chip) return;
+    const v = chip.led[s];
+    const on = (b) => ((v >> b) & 1) === 1;
+    // the speed LEDs take the color of the way the wheels turn
+    const dirColor = on(15) ? 'var(--cyan)' : on(14) ? 'var(--magenta)' : 'var(--neuron)';
+    for (let b = 0; b < 16; b++) {
+      ledEls[b].classList.toggle('on', on(b));
+      ledEls[b].style.setProperty('--c', LED_INFO[b] ? LED_INFO[b][2] : b <= 6 ? dirColor : 'var(--neuron)');
+    }
+    btnUp.classList.toggle('held', on(12));
+    btnDown.classList.toggle('held', on(11));
+    const speed = v & 0x7f;
+    const parts = [];
+    for (let b = 6; b >= 0; b--) if ((speed >> b) & 1) parts.push(1 << b);
+    boardRead.innerHTML = speed === 0 ? 'speed 0 · wheels off'
+      : `speed <b style="color:${dirColor}">${speed}</b>` + (parts.length > 1 ? ` = ${parts.join(' + ')}` : '');
+    const t = chip.ticks[s];
+    boardTicks.textContent = `${t.toLocaleString('en-US')} ticks · ${Math.round((t * 1e6) / chip.clock_hz)} µs`;
+  }
+  btnUp.addEventListener('click', () => startRange(0, Math.min(40, STEPS)));
+  btnDown.addEventListener('click', () => startRange(Math.min(40, STEPS - 1), STEPS));
+  btnRst.addEventListener('click', () => {
+    state.demo = true; state.start = 0; state.end = STEPS; state.loop = true;
+    state.playing = true; acc = 0;
+    clearEffects();
+    enterStep(0, true);
+  });
 
   // ---------- hover ----------
   const raycaster = new THREE.Raycaster();
