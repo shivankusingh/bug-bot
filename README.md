@@ -5,7 +5,9 @@ implemented as a spiking neural network on an FPGA and driving a small robot.
 
 **Status:** the scalable Verilog core runs the whole worm brain (300 neurons, 3,669 chemical
 synapses, 1,087 gap junctions) in simulation and matches the Python reference model bit for bit, every
-voltage and every spike. Next: the robot readout in Verilog, then real FPGA hardware.
+voltage and every spike, and turns motor neuron spikes into wheel commands. It fits on a Digilent
+Basys 3 FPGA board (about 8% of the chip). Next: running it on the real board, with buttons as touches
+and LEDs as wheels.
 
 **Live demo:** [shivankusingh.github.io/bug-bot](https://shivankusingh.github.io/bug-bot/): a 3D view of the
 worm's 300 neurons. Poke the head or tail and watch the brain decide which way the robot moves.
@@ -26,8 +28,9 @@ worm's 300 neurons. Poke the head or tail and watch the brain decide which way t
   walks through memory, and the circuit updates one neuron per clock tick. The wiring lives in memory
   in a compact list format (CSR), so the same design scales from 4 neurons to the whole worm by
   loading different memory files. Each step runs five jobs in order: clear inputs, deliver touches,
-  deliver last step's spikes (skipping neurons that didn't fire), gap junctions, update neurons. A
-  worm step takes about 2,100 clock ticks, around 21 µs at 100 MHz.
+  deliver last step's spikes (skipping neurons that didn't fire), gap junctions, update neurons, then
+  the muscle readout decides the wheels. A worm step takes about 4,600 clock ticks, around 92 µs at
+  the board's 50 MHz.
 - **Verification:** every design is built first as a **Python reference model**, then in **Verilog**,
   and checked bit-for-bit against golden files with [cocotb](https://www.cocotb.org/) testbenches
   (Icarus Verilog), one test per job plus a full replay of the 80-step touch run.
@@ -44,8 +47,10 @@ worm's 300 neurons. Poke the head or tail and watch the brain decide which way t
 - [x] Live 3D demo website
 - [x] Scalable Verilog core (one neuron circuit looping over all neurons, wiring in memory):
       the full 300-neuron brain matches the Python model bit-exact in simulation
-- [ ] Robot readout (muscle buckets) in Verilog
-- [ ] Full brain on real FPGA hardware (Arty A7-100T)
+- [x] Robot readout (muscle buckets) in Verilog, matches Python for the whole touch run
+- [x] Fits on the FPGA: Vivado synthesis and implementation for the Basys 3 (about 8% of the chip)
+- [x] Board design (buttons as touches, a step timer, LEDs as wheels), verified in simulation
+- [ ] Full brain on real FPGA hardware (Basys 3)
 - [ ] More senses (nose touch, then food and steering)
 - [ ] The robot: real sensors and motors
 
