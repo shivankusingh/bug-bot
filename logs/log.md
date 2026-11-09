@@ -774,3 +774,53 @@ For the worm, a slower clock wouldn't matter: over 15,000 steps per second is pl
 2. Add a 100 MHz clock constraint (a small `.xdc`) to see whether the core is fast enough. Synthesis alone says nothing about speed.
 3. Maybe a Tcl script that rebuilds the Vivado project in one command, so the project folder doesn't have to be remembered or copied.
 4. Fly stage, later: ask-then-use reads and one write line for `totals`, so the state can live in BRAM.
+
+# bug-bot log: Nov 8, 2026: muscle readout in Verilog
+
+## Summary
+The core now turns motor neuron spikes into wheel commands, like the Python readout in `touch_test.ipynb`. `test_core_muscles` passes for all 80 steps of the head + tail run, and all the other core tests still pass (chain and full golden, memories, clear, pokes, spikes, pipes).
+
+## What I did
+- Loaded `motor_role.mem` (made last session by `make_mem.py`) into a new memory: `reg [1:0] motor_role [0:N-1]`, one entry per neuron (0 = not a motor, 1 = backward DA/VA, 2 = forward DB/VB).
+- Added 4 outputs: `back_muscle`, `forward_muscle` (7 bits each), `wheel_direction` (2 bits: 0 stop, 1 backward, 2 forward) and `wheel_speed` (7 bits). All 4 are set to 0 in `reset`.
+- Added parameters `MUSCLE_LEAK_FACTOR = 2` and `STOP_BELOW = 8`.
+- Added two states, so a step now goes:
+
+```
+IDLE → CLEAR → POKES → SPIKES → PIPES → MUSCLE_LEAK → UPDATE → MUSCLE_UPDATE → IDLE
+```
+
+| State | Runs | Job |
+|---|---|---|
+| `MUSCLE_LEAK` | once per step, before UPDATE | `bucket = bucket - (bucket >> 2)` for both buckets |
+| `UPDATE_SAVE` | once per neuron | if this neuron is a motor and `new_spike` is 1, +1 to its bucket |
+| `MUSCLE_UPDATE` | once per step, after UPDATE | stop / backward / forward and the speed, then `busy <= 0` |
+
+Two extra ticks per step, on top of ~4,600.
+
+## Decisions
+- **A role per neuron (`motor_role`), not a list of motor numbers.** Python asks "is this neuron in `back_motors`?", but `in` is a hidden loop. In hardware that means either 39 comparators in one tick (slow) or 39 ticks per neuron (~11,700 extra ticks per step). With `motor_role[neuron_index]` it's one lookup, like `start` in SPIKES.
+- **Leak and decide get their own states.** They can't share one: the leak must come before the first +1, and the decide step after the last one. Both are small 7-bit math, so they shouldn't become the slowest path.
+- **The buckets are outputs only for testing.** The robot only needs direction and speed. The test checks the buckets first, so a wrong answer shows whether the bug is in the buckets or in the decide logic. On the board, any output that isn't connected to a pin doesn't cost a pin.
+- **Unsigned, 7 bits.** A bucket never goes negative and tops out at 87 (all 21 backward motors firing every step), and speed is at most 87 too. Signed 7 bits would only reach 63.
+
+## What I learned
+1. **Outputs vs peeking.** The ports are what the outside world (the robot) sees. `spikes` and `voltages` aren't outputs, but the golden test still checks them by looking inside the module, which only works in simulation. `output reg` is still a normal reg inside the module.
+2. **`X + 1 = X`.** A reg that's never set is unknown, and adding to it keeps it unknown. It needs a starting value in `reset`.
+3. **`<=` writes at the end of the tick.** In `UPDATE_SAVE`, `spikes[neuron_index]` still holds last step's spike during that tick, because `spikes[neuron_index] <= new_spike` hasn't happened yet. This step's spike is `new_spike`.
+4. **Once per step vs once per neuron.** UPDATE runs 300 times per step, so a leak there would happen 300 times (20 → 15 → 12 → … → stuck at 3).
+5. **The number in the error message tells you the bug.** At step 10, 9 backward motors fired and the chip showed 7 instead of 9: 0 + 9 = 9, then 9 − (9 >> 2) = 7. That's add-then-leak, so the leak was in the wrong place.
+6. **Careful with brackets:** `motor_role[neuron_index] == 1` checks this neuron's role, while `motor_role[neuron_index == 1]` compiles fine but looks up neuron 0 or 1.
+
+## Mistakes fixed
+- `;` after the last parameter (the list uses commas, and nothing after the last item).
+- Two things named `MUSCLE_LEAK` (a parameter and a state). Renamed the parameter to `MUSCLE_LEAK_FACTOR`.
+- Buckets were `X` until reset set them to 0.
+- Used `spikes[neuron_index]` (last step's) instead of `new_spike` (this step's): the chip added 0 at step 10 instead of 9.
+- The leak state ran after UPDATE: the chip showed 7 instead of 9. Moved it between PIPES and UPDATE.
+- Checked the tie rule by hand, since the test never has a tie at 8 or above: `>` (not `>=`) sends a tie to forward, same as Python.
+
+## Next steps
+1. Vivado (Windows): `git pull`, `reset_run synth_1`, then implementation, to check the new states didn't make timing worse (WNS −0.93 ns at 100 MHz).
+2. Close 100 MHz timing (worst path: SPIKES `start` lookup → `totals`).
+3. Basys 3 top file: connect `wheel_direction` and `wheel_speed` to pins (maybe the buckets to LEDs), and touch inputs to pokes.

@@ -4,14 +4,19 @@ module core #(
     parameter N_POKES = 2,                  // pokes (head, tail)
     parameter N_POKE_LINKS = 2,             // poke links (all pokes glued together)
     parameter N_PIPES = 1,                  // pipes (all pipes glued together)
-    parameter MEM_DIR = "../data/mem/chain" // folder with the .mem files
-    
+    parameter MEM_DIR = "../data/mem/chain", // folder with the .mem files
+    parameter MUSCLE_LEAK_FACTOR = 2,
+    parameter STOP_BELOW = 8
 )(
     input clk,
     input reset,
     input start_step,
     output reg busy,
-    input [N_POKES-1:0] pokes
+    input [N_POKES-1:0] pokes,
+    output reg [6:0] wheel_speed,
+    output reg [1:0] wheel_direction,
+    output reg [6:0] back_muscle,
+    output reg [6:0] forward_muscle
 );
 
     // wiring (loaded once from MEM_DIR, never changes)
@@ -24,6 +29,7 @@ module core #(
     reg [8:0]         pipe_a        [0:N_PIPES-1];
     reg [8:0]         pipe_b        [0:N_PIPES-1];
     reg [7:0] pipe_size     [0:N_PIPES-1];
+    reg [1:0] motor_role    [0:N-1];
     // brain state (one slot per neuron, changes every step)
     reg signed [15:0] voltages [0:N-1];
     reg signed [15:0] totals   [0:N-1];
@@ -42,7 +48,9 @@ module core #(
                PIPES_A = 5,
                PIPES_B = 6,
                UPDATE_READ = 7,
-               UPDATE_SAVE = 8;
+               UPDATE_SAVE = 8,
+               MUSCLE_LEAK = 9,
+               MUSCLE_UPDATE = 10;
                
     reg [3:0] state;
     
@@ -56,6 +64,9 @@ module core #(
     reg [7:0] pipe_size_to_reg;
     wire signed [15:0] totals_temp_val_holder_a;
     wire signed [15:0] totals_temp_val_holder_b;
+
+
+
     initial begin
         $readmemh({MEM_DIR, "/link_receiver.mem"}, link_receiver);
         $readmemh({MEM_DIR, "/link_weight.mem"},   link_weight);
@@ -66,6 +77,7 @@ module core #(
         $readmemh({MEM_DIR, "/pipe_a.mem"},          pipe_a);
         $readmemh({MEM_DIR, "/pipe_b.mem"},          pipe_b);
         $readmemh({MEM_DIR, "/pipe_size.mem"},       pipe_size);
+        $readmemh({MEM_DIR, "/motor_role.mem"},       motor_role);
         for (i = 0; i < N; i = i + 1) begin
             voltages[i] = 0;
             totals[i]   = 0;
@@ -100,6 +112,10 @@ module core #(
             neuron_index <= 0;
             busy <= 0;
             state <= IDLE;
+            back_muscle <= 0;
+            forward_muscle <= 0;
+            wheel_speed <= 0;
+            wheel_direction <= 0;
         end
         else if (state == IDLE) begin
             if (start_step) begin
@@ -176,7 +192,7 @@ module core #(
         // Tick 1: save everything this pipe needs into regs.
         else if (state == PIPES_SAVE) begin
             if (neuron_index == N_PIPES) begin
-                state <= UPDATE_READ;
+                state <= MUSCLE_LEAK;
                 neuron_index <= 0;
                 totals_reg <= 0;
                 old_voltage_reg <= 0;
@@ -202,15 +218,20 @@ module core #(
             totals[pipe_b_neuron_index_reg] <= totals[pipe_b_neuron_index_reg] + pipe_flow + totals_temp_val_holder_b;
             neuron_index <= neuron_index + 1;
         end
-
+        else if (state == MUSCLE_LEAK) begin
+            back_muscle <= back_muscle - (back_muscle >> MUSCLE_LEAK_FACTOR);
+            forward_muscle <= forward_muscle - (forward_muscle >> MUSCLE_LEAK_FACTOR);
+            state <= UPDATE_READ;
+        
+        end
 
         // UPDATE takes two ticks per neuron.
         // Tick 1: read the neuron into the regs that feed lif_math.
         else if (state == UPDATE_READ) begin
             if (neuron_index == N) begin
-                state <= IDLE;
-                busy <= 0;
+                state <= MUSCLE_UPDATE;
                 neuron_index <= 0;
+              
             end
             else begin
                 state <= UPDATE_SAVE;
@@ -224,9 +245,37 @@ module core #(
             state <= UPDATE_READ;
             voltages[neuron_index] <= new_voltage;
             spikes[neuron_index] <= new_spike;
+            // muscles
+            if (motor_role[neuron_index] == 1 && new_spike == 1) begin
+                back_muscle <= back_muscle + 1;
+            end
+            else if (motor_role[neuron_index] == 2 && new_spike==1) begin
+                forward_muscle <= forward_muscle + 1;
+            end
             neuron_index <= neuron_index + 1;
-        end
+        
         
     end
-    
+   
+    else if (state == MUSCLE_UPDATE) begin
+        if(back_muscle < STOP_BELOW && forward_muscle < STOP_BELOW)begin
+            wheel_speed <= 0;
+            wheel_direction <= 0;
+            state <= IDLE;
+            busy <= 0;
+        end
+        else if(back_muscle > forward_muscle)begin
+            wheel_speed <= back_muscle - forward_muscle;
+            wheel_direction <= 1;
+            state <= IDLE;
+            busy <= 0;
+        end
+        else begin
+            wheel_speed <= forward_muscle - back_muscle;
+            wheel_direction <= 2;
+            state <=IDLE;
+            busy<=0;
+        end
+    end
+    end
 endmodule
