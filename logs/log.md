@@ -921,3 +921,34 @@ Added a simulated FPGA board to the demo website, built the whole board design i
 1. Get a data micro-USB cable, then program blinky, then the worm (`impl_2026-11-09_run10_board.bit`): LED 13 should blink 5 times a second; hold the up button ~1 s and LED 15 should light with the speed LEDs counting.
 2. Optional: follow one head press in Surfer (`verilog/sim_build/top/top.fst`).
 3. Later: 100 MHz timing, the robot (motors instead of LEDs), then learning (R-STDP).
+
+# bug-bot log: Nov 9, 2026 (evening): the worm runs on the real board
+
+## Summary
+**The full 300-neuron C. elegans connectome runs on a real FPGA.** Loaded the run 10 bitstream onto the Basys 3: pressing the head button makes the worm back up (LD15), pressing the tail button makes it go forward (LD14), with the wheel speed counting in binary on LD6–LD0. Same design that matched Python bit for bit in simulation, now on hardware.
+
+## What I did
+- Got the board detected by Vivado this time (Hardware Manager showed `xilinx_tcf/Digilent/…` → `xc7a35t_0` instead of only `localhost`).
+- Programmed it: Open Hardware Manager → Open Target → Auto Connect → right-click `xc7a35t_0` → Program Device → `board.bit` (run 10). The DONE LED came on.
+- Went straight to the worm instead of blinky first (blinky would only have been needed if the worm didn't work).
+- Board tests:
+
+| Test | Expected | Result |
+|---|---|---|
+| Nothing pressed | LD13 blinks every step (10 steps/s) | ✅ |
+| Hold btnU (head) | LD12 while held, LD15 (backward) + speed LEDs | ✅ |
+| Hold btnD (tail) | LD11 while held, LD14 (forward) + speed LEDs | ✅ |
+| Let go, wait a few seconds | LD15/LD14 off, speed LEDs dark, only LD13 blinking | ✅ goes quiet on its own |
+| Wrong direction ever? | btnU never lights LD14, btnD never lights LD15 | ✅ never |
+
+## What I learned
+1. **Simulation first paid off.** The design worked on the first load: no debugging on the board, where all I can see is LEDs. All the bugs were found earlier in cocotb, where every signal is visible.
+2. **Reading the LEDs:** the left 5 say what's happening (backward, forward, heartbeat, head, tail), the right 7 are the speed in binary, changing every step, which is why "a bunch of different LEDs" light up while it runs.
+3. **The board problem was never the design.** Power working but no data link pointed at the USB connection; once the board showed up in Hardware Manager, everything worked.
+4. **Programming over JTAG is temporary:** the design is gone when the board loses power and has to be loaded again from Vivado (or written to the board's flash memory later).
+
+## Next steps
+1. Record a short video (head → backward, tail → forward) for the README / website (drag it into GitHub's editor instead of committing it).
+2. The robot: motor driver + wheels on the Pmod pins instead of LEDs, then real touch sensors instead of buttons.
+3. Optional: write the bitstream to the board's flash so it starts on power-up without the laptop.
+4. Later: 100 MHz timing, more behavior tests (one I didn't tune), then learning (R-STDP).

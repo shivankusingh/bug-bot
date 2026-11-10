@@ -369,15 +369,16 @@ img { max-width: 100%; }
       </div>
       <div class="prose">
         <p>The model only uses integer math and bit shifts, and every voltage stays between −512 and 255, so it maps straight onto hardware. The Python version is the reference: its output is saved as golden files, and the Verilog version has to match them bit for bit.</p>
-        <p>The chip design is time-multiplexed: one neuron circuit loops over all 300 neurons, with the wiring stored in on-chip memory. In simulation it matches the Python model bit for bit, every voltage and every spike, and it fits on a Digilent Basys 3 board using about 8% of the chip. A step takes about 4,500 clock ticks, around 90 µs at 50 MHz.</p>
-        <p>The board panel at the top plays back that chip design: buttons as touches, LEDs as the wheels, from a simulation of the Verilog. Running it on the physical board is next.</p>
+        <p>The chip design is time-multiplexed: one neuron circuit loops over all 300 neurons, with the wiring stored in on-chip memory. In simulation it matches the Python model bit for bit, every voltage and every spike, and it fits on a Digilent Basys 3 board using about 8% of the chip. A step takes about 4,600 clock ticks, around 92 µs at 50 MHz.</p>
+        <p>The board panel at the top plays back that chip design: buttons as touches, LEDs as the wheels, from a simulation of the Verilog. The same design now runs on the physical board: press the head button and the backward LED lights up; press the tail button and it goes forward.</p>
         <ul class="road">
           <li><span class="chip done">done</span>Python model with the real connectome</li>
           <li><span class="chip done">done</span>Touch → decision → motors → wheels, both directions</li>
           <li><span class="chip done">done</span>Full 300-neuron core in Verilog, verified bit-exact</li>
           <li><span class="chip done">done</span>Wheel readout and board design (buttons, LEDs), verified in simulation</li>
-          <li><span class="chip next">next</span>Running on the physical FPGA board</li>
-          <li><span class="chip">later</span>The robot: real sensors and motors</li>
+          <li><span class="chip done">done</span>Running on the physical FPGA board (Basys 3)</li>
+          <li><span class="chip next">next</span>The robot: real sensors and motors</li>
+          <li><span class="chip">later</span>Learning on the chip (reward-based R-STDP)</li>
         </ul>
       </div>
     </section>
