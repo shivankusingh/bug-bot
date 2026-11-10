@@ -876,3 +876,48 @@ Checked the muscle readout in Vivado (run 8), got a first board test (blinky) re
 2. Get a data micro-USB cable, then program blinky, then the worm: hold the up button ~1 s and LED 15 should light for ~2.5 s.
 3. Optional: follow one head press in Surfer (`verilog/sim_build/top/top.fst`).
 4. Later: 100 MHz timing, the robot (motors instead of LEDs), then learning (R-STDP).
+
+# bug-bot log: Nov 9, 2026: board panel on the website, first full-worm bitstream (Vivado runs 9 and 10)
+
+## Summary
+Added a simulated FPGA board to the demo website, built the whole board design in Vivado for the first time (run 9), fixed its one critical warning, and rebuilt it clean (run 10). The bitstream for the Basys 3 is done and timing passes at 50 MHz. The only thing left before the worm runs on the real board is a data USB cable.
+
+## What I did
+- **Website board panel** (`docs/index.html`): a 16-LED Basys 3 panel next to the robot in the hero. The LEDs come from the **Verilog simulation** (`docs/board.json`, written by `test_top.py` when it passes), not the Python model. Speed LEDs light in the direction's color with their bit weights under them ("speed 36 = 32 + 4"). The ▲ / ▼ buttons play the head / tail poke, ● restarts the demo, and the header shows how many ticks the chip took that step (~4,500 ticks ≈ 90 µs at 50 MHz). Also updated the "Built to run on an FPGA" section and the roadmap.
+- **New Vivado project `bug-bot-board`** (`C:\fpga\vivado\bug-bot-board`): `core.v`, `lif_math.v`, `top.v`, `board.v` + `board.xdc`, part `xc7a35tcpg236-1`, top = `board`, generic `MEM_DIR` only (the worm sizes are already `top.v`'s defaults). Made `clk_wiz_0` with the Clocking Wizard: 100 MHz in, 50 MHz out, reset + locked, synthesized out of context (built once and reused).
+- **Run 9** (first full board build): bitstream written, all 10 `.mem` files read, timing met, but **1 critical warning (TIMING-6)**: the 100 MHz clock was declared twice.
+- **Fixed `board.xdc`:** removed its `create_clock` line, because the Clocking Wizard's own constraints already declare that clock.
+- **Run 10** (rebuild after the fix): 0 critical warnings, one 100 MHz and one 50 MHz clock. Committed the bitstream (`logs/vivado/impl_2026-11-09_run10_board.bit`) so any computer with Vivado can program the board without rebuilding.
+
+| | Run 8 (core alone, 100 MHz) | Run 9 (board, 50 MHz) | Run 10 (board, clock fix) |
+|---|---|---|---|
+| WNS | −0.74 ns ❌ | +6.61 ns ✅ | +6.21 ns ✅ |
+| Critical warnings | 0 | 1 (TIMING-6) | **0** |
+| LUTs | 1,602 | 1,611 | 1,611 |
+| Flip-flops | 172 | 211 | 211 |
+| BRAM tiles / DSPs | 4 / 1 | 4 / 1 | 4 / 1 |
+| Clock maker (MMCM) | – | 1 of 5 | 1 of 5 |
+| Pins | 29 | 20 | 20 |
+
+  Pins went down because they're real now: 1 clock + 3 buttons + 16 LEDs. Before, every core output counted as a pin. The +39 flip-flops are mostly the 23-bit `step_count` and the 6 button sync flip-flops. Worst path (runs 9 and 10): still SPIKES, `slot_spikes` → add weight → write `totals`, 13.3 ns, ~73% of it wire (~75 MHz max). Power 0.195 W.
+- Leftover warnings, all expected: `led[10:7]` driven by constant 0 (unused on purpose), "not ideal for floorplanning" (only matters for hand placement), and SYNTH-5/6 (memories put in LUT RAM, which is what I want for `voltages`, `spikes`, `totals`).
+
+## Decisions
+- **Website LEDs come from the Verilog simulation**, not Python, so the panel shows what the chip design actually does. `board.json` has to be regenerated (rerun `test_top.py`) whenever `core.v` or `top.v` changes.
+- **The Clocking Wizard owns the clock constraint.** `board.xdc` only sets the pin (W5).
+- **Commit a `.bit` only when it's one I actually load onto the board.** It's 2.2 MB, and git keeps every version forever.
+
+## What I learned
+1. **Out of context IP:** Vivado builds the clock maker once on its own (`clk_wiz_0_synth_1` under "Out-of-Context Module Runs") and reuses it, so rebuilding my design doesn't rebuild the clock maker.
+2. **Declaring one clock twice is a real problem for the tool, even if not for the board.** Vivado thought there were two unrelated 100 MHz clocks, timed every path twice, and couldn't prove they were in step (TIMING-6). One clock, one `create_clock`.
+3. **Vivado only works as hard as the clock needs.** The worst path got slower (10.7 → 13.3 ns) because with 20 ns per tick it stops trying once timing passes and places things more loosely. Same logic, longer wires. WNS also moves a bit between builds (6.61 → 6.21) with no logic change.
+4. **Fewer pins once there's a real top.** Pins are only what leaves the chip, so the core's outputs no longer count once `top` turns them into 16 LEDs.
+5. **Git paths are relative to where the terminal is.** After `cd docs` for the website preview, `git add docs/index.html` failed ("did not match any files"); `cd ..` back to the repo root fixed it. `pwd` shows where I am.
+
+## Mistakes fixed
+- `board.xdc` declared the 100 MHz clock a second time (TIMING-6 critical warning in run 9). Fixed by removing the `create_clock` line; run 10 is clean.
+
+## Next steps
+1. Get a data micro-USB cable, then program blinky, then the worm (`impl_2026-11-09_run10_board.bit`): LED 13 should blink 5 times a second; hold the up button ~1 s and LED 15 should light with the speed LEDs counting.
+2. Optional: follow one head press in Surfer (`verilog/sim_build/top/top.fst`).
+3. Later: 100 MHz timing, the robot (motors instead of LEDs), then learning (R-STDP).
