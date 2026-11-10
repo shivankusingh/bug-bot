@@ -1,0 +1,104 @@
+﻿Copyright 1986-2022 Xilinx, Inc. All Rights Reserved. Copyright 2022-2026 Advanced Micro Devices, Inc. All Rights Reserved.
+---------------------------------------------------------------------------------------------------------------------------------------------
+| Tool Version : Vivado v.2026.1 (win64) Build 6511674 Tue Jun 16 11:02:23 MDT 2026
+| Date         : Mon Nov  9 16:23:19 2026
+| Host         : (removed)
+| Command      : report_control_sets -verbose -file board_control_sets_placed.rpt
+| Design       : board
+| Device       : xc7a35t
+---------------------------------------------------------------------------------------------------------------------------------------------
+
+Control Set Information
+
+Table of Contents
+-----------------
+1. Summary
+2. Histogram
+3. Flip-Flop Distribution
+4. Detailed Control Set Information
+
+1. Summary
+----------
+
++----------------------------------------------------------+-------+
+|                          Status                          | Count |
++----------------------------------------------------------+-------+
+| Total control sets                                       |    26 |
+|    Minimum number of control sets                        |    26 |
+|    Addition due to synthesis replication                 |     0 |
+|    Addition due to physical synthesis replication        |     0 |
+| Unused register locations in slices containing registers |    21 |
++----------------------------------------------------------+-------+
+* Control sets can be merged at opt_design using control_set_merge or merge_equivalent_drivers
+** Run report_qor_suggestions for automated merging and remapping suggestions
+
+
+2. Histogram
+------------
+
++--------------------+-------+
+|       Fanout       | Count |
++--------------------+-------+
+| Total control sets |    26 |
+| >= 0 to < 4        |     0 |
+| >= 4 to < 6        |     1 |
+| >= 6 to < 8        |     3 |
+| >= 8 to < 10       |     2 |
+| >= 10 to < 12      |     0 |
+| >= 12 to < 14      |     1 |
+| >= 14 to < 16      |     0 |
+| >= 16              |    19 |
++--------------------+-------+
+* Control sets can be remapped at either synth_design or opt_design
+
+
+3. Flip-Flop Distribution
+-------------------------
+
++--------------+-----------------------+------------------------+-----------------+--------------+
+| Clock Enable | Synchronous Set/Reset | Asynchronous Set/Reset | Total Registers | Total Slices |
++--------------+-----------------------+------------------------+-----------------+--------------+
+| No           | No                    | No                     |              12 |           10 |
+| No           | No                    | Yes                    |               0 |            0 |
+| No           | Yes                   | No                     |              23 |            6 |
+| Yes          | No                    | No                     |              62 |           27 |
+| Yes          | No                    | Yes                    |               0 |            0 |
+| Yes          | Yes                   | No                     |             114 |           47 |
++--------------+-----------------------+------------------------+-----------------+--------------+
+
+
+4. Detailed Control Set Information
+-----------------------------------
+
++----------------------------+---------------------------------------------------------+------------------------------------------+------------------+----------------+--------------+
+|        Clock Signal        |                      Enable Signal                      |             Set/Reset Signal             | Slice Load Count | Bel Load Count | Bels / Slice |
++----------------------------+---------------------------------------------------------+------------------------------------------+------------------+----------------+--------------+
+|  clock_maker/inst/clk_out1 | bug_bot/worm/state[3]_i_1_n_0                           | bug_bot/reset                            |                3 |              4 |         1.33 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/neuron_math/E[0]                           | bug_bot/reset                            |                2 |              7 |         3.50 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/neuron_math/state_reg[0][0]                | bug_bot/reset                            |                2 |              7 |         3.50 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/wheel_speed[6]_i_2_n_0                     | bug_bot/worm/wheel_speed[6]_i_1_n_0      |                2 |              7 |         3.50 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/poke_index[7]_i_2_n_0                      | bug_bot/worm/poke_index[7]_i_1_n_0       |                3 |              8 |         2.67 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/slot[0]                                    | bug_bot/worm/slot[7]_i_1_n_0             |                1 |              8 |         8.00 |
+|  clock_maker/inst/clk_out1 |                                                         |                                          |               10 |             12 |         1.20 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/slot_spikes[15]_i_2_n_0                    | bug_bot/worm/slot_spikes[15]_i_1_n_0     |                4 |             16 |         4.00 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/voltages_reg_r2_0_63_0_2_i_1_n_0           |                                          |                6 |             22 |         3.67 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/voltages_reg_r2_64_127_0_2_i_1_n_0         |                                          |                6 |             22 |         3.67 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/voltages_reg_r2_128_191_0_2_i_1_n_0        |                                          |                6 |             22 |         3.67 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/voltages_reg_r2_192_255_0_2_i_1_n_0        |                                          |                6 |             22 |         3.67 |
+|  clock_maker/inst/clk_out1 |                                                         | bug_bot/step_count[0]_i_1_n_0            |                6 |             23 |         3.83 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/neuron_index[10]_i_2_n_0                   | bug_bot/worm/neuron_index[10]_i_1_n_0    |               10 |             25 |         2.50 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/old_voltage_reg[15]_i_2_n_0                | bug_bot/worm/old_voltage_reg[15]_i_1_n_0 |               20 |             32 |         1.60 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/spikes_reg_0_63_0_0_i_1_n_0                |                                          |               15 |             58 |         3.87 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/pipe_a_neuron_index_reg_rep_rep[8]_i_1_n_0 |                                          |               27 |             62 |         2.30 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_0_127_0_0_i_2_n_0               |                                          |               16 |             64 |         4.00 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_128_255_0_0_i_1_n_0             |                                          |               16 |             64 |         4.00 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/spikes_reg_128_255_0_0_i_1_n_0             |                                          |               18 |             72 |         4.00 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/spikes_reg_0_127_0_0_i_1_n_0               |                                          |               18 |             72 |         4.00 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_r2_128_191_0_2_i_1_n_0          |                                          |               23 |             88 |         3.83 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_r2_192_255_0_2_i_1_n_0          |                                          |               23 |             88 |         3.83 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_r2_64_127_0_2_i_1_n_0           |                                          |               23 |             88 |         3.83 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_r2_0_63_0_2_i_1_n_0             |                                          |               28 |            110 |         3.93 |
+|  clock_maker/inst/clk_out1 | bug_bot/worm/totals_reg_0_63_0_0_i_1_n_0                |                                          |               31 |            120 |         3.87 |
++----------------------------+---------------------------------------------------------+------------------------------------------+------------------+----------------+--------------+
+
+
