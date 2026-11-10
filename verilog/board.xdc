@@ -1,10 +1,11 @@
 ## board.xdc: pins for board.v (the worm on the Basys 3).
 ## Pin numbers from Digilent's Basys-3-Master.xdc (github.com/Digilent/digilent-xdc).
-## The 50 MHz clock made by the Clocking Wizard gets its own timing constraint automatically.
+## No create_clock here: the Clocking Wizard's own constraints already declare the 100 MHz
+## input clock (and the 50 MHz clock it makes). Declaring it here too made Vivado time
+## everything twice and raise critical warning TIMING-6 (run 9).
 
 ## 100 MHz board clock
 set_property -dict { PACKAGE_PIN W5  IOSTANDARD LVCMOS33 } [get_ports clk]
-create_clock -add -name sys_clk_pin -period 10.00 -waveform {0 5} [get_ports clk]
 
 ## Buttons: center = reset, up = head poke, down = tail poke
 set_property -dict { PACKAGE_PIN U18 IOSTANDARD LVCMOS33 } [get_ports btnC]
